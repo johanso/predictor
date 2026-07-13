@@ -2,14 +2,21 @@ import { LeagueSelector } from "@/components/LeagueSelector";
 
 export default function Home() {
   return (
-    <main className="mx-auto flex max-w-4xl flex-col gap-6 px-6 py-12">
-      <div>
-        <h1 className="text-2xl font-semibold">Predictor de Fútbol</h1>
-        <p className="mt-1 text-neutral-500">
-          Modelo de Poisson sobre estadísticas reales (football-data.org). Elige una liga para empezar.
-        </p>
-      </div>
-      <LeagueSelector />
-    </main>
+    <>
+      <header className="border-b-2 border-gold bg-ink text-paper">
+        <div className="mx-auto max-w-4xl px-6 py-10">
+          <p className="label-eyebrow text-xs text-gold">Modelo de Poisson · datos en vivo</p>
+          <h1 className="mt-2 text-4xl font-semibold uppercase tracking-tight sm:text-5xl">Predictor</h1>
+          <p className="mt-2 max-w-lg text-sm text-paper/70">
+            Probabilidades y cuotas de mercados de fútbol calculadas desde estadísticas reales de local y
+            visitante. Elige una liga para armar un partido.
+          </p>
+        </div>
+      </header>
+      <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 px-6 py-10">
+        <h2 className="label-eyebrow text-xs text-ink-soft">Ligas disponibles</h2>
+        <LeagueSelector />
+      </main>
+    </>
   );
 }

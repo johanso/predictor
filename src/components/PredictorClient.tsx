@@ -67,39 +67,40 @@ export function PredictorClient({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-end gap-4 rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
-        <TeamSelector label="Equipo local" teams={teams} value={homeTeamId} onChange={setHomeTeamId} disabledTeamId={awayTeamId} />
-        <TeamSelector label="Equipo visitante" teams={teams} value={awayTeamId} onChange={setAwayTeamId} disabledTeamId={homeTeamId} />
+      <div className="flex flex-wrap items-end gap-4 border border-line bg-paper-raised p-4">
+        <TeamSelector label="Local" tone="pitch" teams={teams} value={homeTeamId} onChange={setHomeTeamId} disabledTeamId={awayTeamId} />
+        <span className="label-eyebrow pb-2 text-xs text-ink-soft">vs</span>
+        <TeamSelector label="Visitante" tone="sky" teams={teams} value={awayTeamId} onChange={setAwayTeamId} disabledTeamId={homeTeamId} />
         <button
           onClick={handleCalculate}
           disabled={!canCalculate || loading}
-          className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="label-eyebrow bg-ink px-5 py-2 text-xs text-paper transition-colors hover:bg-pitch disabled:cursor-not-allowed disabled:opacity-40"
         >
           {loading ? "Calculando…" : "Calcular"}
         </button>
         <button
           onClick={handleRefresh}
           disabled={refreshing}
-          className="ml-auto rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-600 transition hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+          className="label-eyebrow ml-auto border border-line px-3 py-2 text-xs text-ink-soft transition-colors hover:border-sky hover:text-sky disabled:opacity-50"
         >
-          {refreshing ? "Actualizando…" : "Refrescar standings"}
+          {refreshing ? "Actualizando…" : "Refrescar"}
         </button>
       </div>
 
       {fetchedAt && (
-        <p className="text-xs text-neutral-400">Datos actualizados: {new Date(fetchedAt).toLocaleString()}</p>
+        <p className="font-numeric text-xs text-ink-soft">
+          Datos actualizados: {new Date(fetchedAt).toLocaleString("es")}
+        </p>
       )}
 
-      {error && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-          {error}
-        </div>
-      )}
+      {error && <div className="border-l-4 border-red bg-red-dim px-4 py-3 text-sm text-red">{error}</div>}
 
       {prediction && (
         <div className="flex flex-col gap-6">
-          <h2 className="text-lg font-semibold">
-            {prediction.homeTeam} vs {prediction.awayTeam}
+          <h2 className="flex items-baseline gap-3 text-2xl font-semibold uppercase tracking-tight">
+            <span className="text-pitch">{prediction.homeTeam}</span>
+            <span className="label-eyebrow text-sm text-ink-soft">vs</span>
+            <span className="text-sky">{prediction.awayTeam}</span>
           </h2>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <OneXTwoCard homeWin={prediction.oneXTwo.homeWin} draw={prediction.oneXTwo.draw} awayWin={prediction.oneXTwo.awayWin} />

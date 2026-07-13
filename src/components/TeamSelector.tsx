@@ -5,22 +5,26 @@ interface TeamOption {
 
 export function TeamSelector({
   label,
+  tone,
   teams,
   value,
   onChange,
   disabledTeamId,
 }: {
   label: string;
+  tone: "pitch" | "sky";
   teams: TeamOption[];
   value: number | null;
   onChange: (teamId: number) => void;
   disabledTeamId: number | null;
 }) {
+  const toneClass = tone === "pitch" ? "border-t-pitch focus:border-pitch" : "border-t-sky focus:border-sky";
+
   return (
-    <label className="flex flex-col gap-1 text-sm">
-      <span className="font-medium text-neutral-600 dark:text-neutral-300">{label}</span>
+    <label className="flex flex-1 flex-col gap-1.5">
+      <span className="label-eyebrow text-xs text-ink-soft">{label}</span>
       <select
-        className="rounded-md border border-neutral-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900"
+        className={`border border-line border-t-2 bg-paper-raised px-3 py-2 text-sm text-ink outline-none ${toneClass}`}
         value={value ?? ""}
         onChange={(e) => onChange(Number(e.target.value))}
       >

@@ -3,18 +3,21 @@ import { COMPETITIONS } from "@/lib/footballData/competitions";
 
 export function LeagueSelector() {
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
+    <div className="grid grid-cols-1 gap-px bg-line sm:grid-cols-2 md:grid-cols-3">
       {COMPETITIONS.map((league) => (
         <Link
           key={league.code}
           href={`/leagues/${league.code}`}
-          className="rounded-lg border border-neutral-200 bg-white p-4 transition hover:border-emerald-500 hover:shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
+          className="group flex flex-col gap-3 bg-paper-raised p-4 transition-colors hover:bg-pitch-dim"
         >
-          <div className="font-medium">{league.name}</div>
-          <div className="text-xs text-neutral-500">{league.code}</div>
-          {!league.hasHomeAway && (
-            <div className="mt-1 text-xs text-amber-600 dark:text-amber-400">Sin marcador local/visitante</div>
-          )}
+          <div className="flex items-center justify-between">
+            <span className="font-numeric text-xs text-ink-soft">{league.code}</span>
+            <span
+              aria-hidden
+              className="h-px flex-1 mx-2 bg-[repeating-linear-gradient(90deg,var(--line)_0,var(--line)_4px,transparent_4px,transparent_8px)] group-hover:bg-[repeating-linear-gradient(90deg,var(--pitch)_0,var(--pitch)_4px,transparent_4px,transparent_8px)]"
+            />
+          </div>
+          <span className="text-lg font-medium uppercase tracking-tight text-ink">{league.name}</span>
         </Link>
       ))}
     </div>

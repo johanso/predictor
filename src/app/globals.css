@@ -1,26 +1,97 @@
 @import "tailwindcss";
 
+/*
+  "Matchday program" identity: a chalk-tinted paper ground (not warm cream),
+  pitch-green as the primary/home accent, sky-blue as the secondary/away
+  accent, and referee-card colors doing double duty as semantic tone —
+  gold for caution, red for error. Every number in the app renders in the
+  mono face with tabular figures, like a scoreboard.
+*/
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --paper: #f1f4ef;
+  --paper-raised: #ffffff;
+  --ink: #14201a;
+  --ink-soft: #4a564e;
+  --pitch: #1f6d45;
+  --pitch-dim: #e7efe9;
+  --sky: #2a6e8f;
+  --sky-dim: #e5eef1;
+  --gold: #a3801a;
+  --gold-dim: #f6eed7;
+  --red: #a5233a;
+  --red-dim: #f8e6e9;
+  --line: #d8ded3;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --paper: #10160f;
+    --paper-raised: #182018;
+    --ink: #edf1ea;
+    --ink-soft: #a9b3a5;
+    --pitch: #4aa578;
+    --pitch-dim: #16281e;
+    --sky: #6bafcb;
+    --sky-dim: #142832;
+    --gold: #d8b646;
+    --gold-dim: #2c2410;
+    --red: #e2718a;
+    --red-dim: #331319;
+    --line: #2a342a;
   }
 }
 
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-raised: var(--paper-raised);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-pitch: var(--pitch);
+  --color-pitch-dim: var(--pitch-dim);
+  --color-sky: var(--sky);
+  --color-sky-dim: var(--sky-dim);
+  --color-gold: var(--gold);
+  --color-gold-dim: var(--gold-dim);
+  --color-red: var(--red);
+  --color-red-dim: var(--red-dim);
+  --color-line: var(--line);
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-mono: var(--font-mono);
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  text-wrap: balance;
+}
+
+.font-numeric {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.label-eyebrow {
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Wide tabular content never forces the page body to scroll sideways. */
+.overflow-x-auto {
+  scrollbar-width: thin;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
 }
