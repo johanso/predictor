@@ -1,0 +1,52 @@
+// Prisma schema — cache layer for football-data.org standings.
+// Not a historical archive: TeamStanding rows are overwritten on refresh.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Competition {
+  code        String    @id // e.g. "BSA", "PL"
+  name        String
+  season      Int?
+  hasHomeAway Boolean   @default(true)
+  fetchedAt   DateTime?
+  teams       Team[]
+}
+
+model Team {
+  id              Int           @id // football-data.org team id
+  name            String
+  crestUrl        String?
+  competitionCode String
+  competition     Competition   @relation(fields: [competitionCode], references: [code])
+  standing        TeamStanding?
+
+  @@index([competitionCode])
+}
+
+model TeamStanding {
+  teamId Int  @id
+  team   Team @relation(fields: [teamId], references: [id])
+
+  playedHome       Int
+  goalsForHome     Int
+  goalsAgainstHome Int
+
+  playedAway       Int
+  goalsForAway     Int
+  goalsAgainstAway Int
+
+  playedTotal Int
+  wonTotal    Int
+  drawTotal   Int
+  lostTotal   Int
+  pointsTotal Int
+
+  fetchedAt DateTime @default(now())
+}
