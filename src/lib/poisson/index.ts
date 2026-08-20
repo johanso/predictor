@@ -9,6 +9,7 @@ import {
   overUnderProbabilities,
 } from "./markets";
 import { toOdds } from "./math";
+import { applyDixonColesAdjustment } from "./dixonColes";
 
 function outcome(label: string, probability: number): MarketOutcome {
   return { label, probability, odds: toOdds(probability) };
@@ -31,7 +32,10 @@ export function predictMatch(
   const awayFactors = computeTeamFactors(away, leagueAvg);
   const { lambdaHome, lambdaAway } = computeLambdas(homeFactors, awayFactors);
 
-  const matrix = buildProbabilityMatrix(lambdaHome, lambdaAway);
+  const rawMatrix = buildProbabilityMatrix(lambdaHome, lambdaAway);
+  // Dixon-Coles: corrects the independent-Poisson model's known mispricing of
+  // low scorelines (0-0/1-0/0-1/1-1) — see src/lib/poisson/dixonColes.ts.
+  const matrix = applyDixonColesAdjustment(rawMatrix, lambdaHome, lambdaAway);
 
   const { homeWin, draw, awayWin } = oneXTwoProbabilities(matrix);
   const btts = bttsProbabilities(matrix);
@@ -73,3 +77,5 @@ export * from "./math";
 export * from "./teamStats";
 export * from "./matchup";
 export * from "./markets";
+export * from "./dixonColes";
+export * from "./weighting";

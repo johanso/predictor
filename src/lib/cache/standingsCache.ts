@@ -2,10 +2,25 @@ import { prisma } from "@/lib/db";
 import { getFinishedMatches, FootballDataError } from "@/lib/footballData/client";
 import { getCompetitionInfo } from "@/lib/footballData/competitions";
 import type { FdMatch } from "@/lib/footballData/types";
+import { computeWeightedTeamGoalStats, DEFAULT_HALF_LIFE_DAYS } from "@/lib/poisson/weighting";
 import type { TeamGoalStats } from "@/types/domain";
 
 const TTL_MS = 6 * 60 * 60 * 1000; // refetch at most every 6h
 const MIN_REFRESH_INTERVAL_MS = 60 * 1000; // guard against rapid "Refresh" clicks
+
+export interface StandingsRow {
+  teamId: number;
+  teamName: string;
+  crestUrl: string | null;
+  played: number;
+  won: number;
+  draw: number;
+  lost: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  goalDifference: number;
+  points: number;
+}
 
 export interface LeagueStandingsResult {
   code: string;
@@ -15,6 +30,7 @@ export interface LeagueStandingsResult {
   fetchedAt: Date | null;
   seasonStarted: boolean; // false when no finished matches yet
   teams: TeamGoalStats[];
+  table: StandingsRow[]; // sorted for display: points desc, then goal difference, then goals for
 }
 
 export async function ensureFreshStandings(
@@ -61,6 +77,31 @@ async function readFromDb(code: string): Promise<LeagueStandingsResult> {
 
   const seasonStarted = teams.some((t) => t.playedHome > 0 || t.playedAway > 0);
 
+  const table: StandingsRow[] = result.teams
+    .filter((t) => t.standing)
+    .map((t) => {
+      const s = t.standing!;
+      const goalsFor = s.goalsForHome + s.goalsForAway;
+      const goalsAgainst = s.goalsAgainstHome + s.goalsAgainstAway;
+      return {
+        teamId: t.id,
+        teamName: t.name,
+        crestUrl: t.crestUrl,
+        played: s.playedTotal,
+        won: s.wonTotal,
+        draw: s.drawTotal,
+        lost: s.lostTotal,
+        goalsFor,
+        goalsAgainst,
+        goalDifference: goalsFor - goalsAgainst,
+        points: s.pointsTotal,
+      };
+    })
+    .sort(
+      (a, b) =>
+        b.points - a.points || b.goalDifference - a.goalDifference || b.goalsFor - a.goalsFor || a.teamName.localeCompare(b.teamName)
+    );
+
   return {
     code: result.code,
     name: result.name,
@@ -69,7 +110,55 @@ async function readFromDb(code: string): Promise<LeagueStandingsResult> {
     fetchedAt: result.fetchedAt,
     seasonStarted,
     teams,
+    table,
   };
+}
+
+/**
+ * Recency-weighted team stats for prediction, read from the raw Match cache
+ * (see refreshFromApi below). Falls back to the unweighted snapshot if Match
+ * hasn't been backfilled yet for this competition (e.g. right after this
+ * feature ships, before the next TTL-triggered or manual refresh runs).
+ */
+export async function getWeightedTeamStats(
+  code: string,
+  halfLifeDays: number = DEFAULT_HALF_LIFE_DAYS
+): Promise<TeamGoalStats[]> {
+  const [matches, teams] = await Promise.all([
+    prisma.match.findMany({ where: { competitionCode: code } }),
+    prisma.team.findMany({ where: { competitionCode: code } }),
+  ]);
+
+  if (matches.length === 0) {
+    return (await readFromDb(code)).teams;
+  }
+
+  const referenceDate = matches.reduce((max, m) => (m.utcDate > max ? m.utcDate : max), matches[0].utcDate);
+  const weighted = computeWeightedTeamGoalStats(
+    matches.map((m) => ({
+      homeTeamId: m.homeTeamId,
+      awayTeamId: m.awayTeamId,
+      homeGoals: m.homeGoals,
+      awayGoals: m.awayGoals,
+      utcDate: m.utcDate,
+    })),
+    referenceDate,
+    halfLifeDays
+  );
+
+  return teams.map((t) => {
+    const w = weighted.get(t.id);
+    return {
+      teamId: t.id,
+      teamName: t.name,
+      playedHome: w?.playedHome ?? 0,
+      goalsForHome: w?.goalsForHome ?? 0,
+      goalsAgainstHome: w?.goalsAgainstHome ?? 0,
+      playedAway: w?.playedAway ?? 0,
+      goalsForAway: w?.goalsForAway ?? 0,
+      goalsAgainstAway: w?.goalsAgainstAway ?? 0,
+    };
+  });
 }
 
 interface AggregatedTeam {
@@ -166,6 +255,7 @@ async function refreshFromApi(code: string, name: string, hasHomeAway: boolean):
 
   const season = data.season?.startDate ? new Date(data.season.startDate).getFullYear() : null;
   const byTeam = aggregateFromMatches(data.matches);
+  const completedMatches = data.matches.filter((m) => m.score.fullTime.home !== null && m.score.fullTime.away !== null);
 
   await prisma.$transaction([
     prisma.competition.upsert({
@@ -211,6 +301,27 @@ async function refreshFromApi(code: string, name: string, hasHomeAway: boolean):
         },
       }),
     ]),
+    ...completedMatches.map((m) =>
+      prisma.match.upsert({
+        where: { id: m.id },
+        create: {
+          id: m.id,
+          competitionCode: code,
+          utcDate: new Date(m.utcDate),
+          homeTeamId: m.homeTeam.id,
+          awayTeamId: m.awayTeam.id,
+          homeGoals: m.score.fullTime.home!,
+          awayGoals: m.score.fullTime.away!,
+          winner: m.score.winner,
+        },
+        update: {
+          utcDate: new Date(m.utcDate),
+          homeGoals: m.score.fullTime.home!,
+          awayGoals: m.score.fullTime.away!,
+          winner: m.score.winner,
+        },
+      })
+    ),
   ]);
 }
 

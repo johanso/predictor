@@ -34,6 +34,8 @@ export interface FdStandingsResponse {
 export interface FdMatch {
   id: number;
   status: string;
+  utcDate: string;
+  matchday: number | null;
   homeTeam: FdTeam;
   awayTeam: FdTeam;
   score: {

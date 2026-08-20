@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { TeamSelector } from "@/components/TeamSelector";
+import { FixturesList, type FixtureOption } from "@/components/FixturesList";
 import { OneXTwoCard } from "@/components/ResultsPanel/OneXTwoCard";
 import { ExactScoreGrid } from "@/components/ResultsPanel/ExactScoreGrid";
 import { BttsCard } from "@/components/ResultsPanel/BttsCard";
@@ -19,10 +20,12 @@ export function PredictorClient({
   competitionCode,
   teams,
   fetchedAt,
+  fixtures,
 }: {
   competitionCode: string;
   teams: TeamOption[];
   fetchedAt: string | null;
+  fixtures: FixtureOption[];
 }) {
   const router = useRouter();
   const [homeTeamId, setHomeTeamId] = useState<number | null>(null);
@@ -58,15 +61,26 @@ export function PredictorClient({
   async function handleRefresh() {
     setRefreshing(true);
     try {
-      await fetch(`/api/leagues/${competitionCode}/standings?refresh=1`);
+      await Promise.all([
+        fetch(`/api/leagues/${competitionCode}/standings?refresh=1`),
+        fetch(`/api/leagues/${competitionCode}/fixtures?refresh=1`),
+      ]);
       router.refresh();
     } finally {
       setRefreshing(false);
     }
   }
 
+  function handleFixtureClick(f: FixtureOption) {
+    setHomeTeamId(f.homeTeamId);
+    setAwayTeamId(f.awayTeamId);
+    setPrediction(null);
+    setError(null);
+  }
+
   return (
     <div className="flex flex-col gap-6">
+      {fixtures.length > 0 && <FixturesList fixtures={fixtures} onSelect={handleFixtureClick} />}
       <div className="flex flex-wrap items-end gap-4 border border-line bg-paper-raised p-4">
         <TeamSelector label="Local" tone="pitch" teams={teams} value={homeTeamId} onChange={setHomeTeamId} disabledTeamId={awayTeamId} />
         <span className="label-eyebrow pb-2 text-xs text-ink-soft">vs</span>

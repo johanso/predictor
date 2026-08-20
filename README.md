@@ -1,9 +1,11 @@
 # Predictor de Fútbol
 
-App en Next.js que predice mercados de fútbol (1X2, marcador exacto, ambos marcan, doble
-oportunidad, over/under) usando un modelo de Poisson sobre estadísticas reales de
-[football-data.org](https://www.football-data.org). Reemplaza a la calculadora original en Excel
-(`LIGA-SERIA-A-BRASIL.xlsx`), ahora con 10 ligas del plan gratuito.
+Una aplicación web basada en **Next.js 16** que calcula probabilidades de los principales
+mercados de apuestas de fútbol (1X2, marcador exacto, ambos anotan, doble oportunidad,
+over/under) utilizando un modelo estadístico **Poisson** aplicado a datos reales obtenidos de
+la API pública **football-data.org**. El proyecto reproduce y mejora la funcionalidad de la
+calculadora de Excel (`LIGA‑SERIA‑A‑BRASIL.xlsx`) ofreciendo soporte para diez ligas del plan
+gratuito y una interfaz interactiva.
 
 ## Cómo funciona el modelo
 

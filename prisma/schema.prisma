@@ -11,12 +11,15 @@ datasource db {
 }
 
 model Competition {
-  code        String    @id // e.g. "BSA", "PL"
-  name        String
-  season      Int?
-  hasHomeAway Boolean   @default(true)
-  fetchedAt   DateTime?
-  teams       Team[]
+  code              String    @id // e.g. "BSA", "PL"
+  name              String
+  season            Int?
+  hasHomeAway       Boolean   @default(true)
+  fetchedAt         DateTime?
+  fixturesFetchedAt DateTime? // separate TTL from fetchedAt: fixtures refresh independently
+  teams             Team[]
+  matches           Match[]
+  fixtures          Fixture[]
 }
 
 model Team {
@@ -49,4 +52,42 @@ model TeamStanding {
   pointsTotal Int
 
   fetchedAt DateTime @default(now())
+}
+
+// Raw finished-match results, used to compute recency-weighted team stats.
+// Immutable once FINISHED, so upserts are idempotent; only grows during a season.
+model Match {
+  id              Int         @id // football-data.org match id
+  competitionCode String
+  competition     Competition @relation(fields: [competitionCode], references: [code])
+  utcDate         DateTime
+  homeTeamId      Int
+  awayTeamId      Int
+  homeGoals       Int
+  awayGoals       Int
+  winner          String? // "HOME_TEAM" | "AWAY_TEAM" | "DRAW" | null
+  fetchedAt       DateTime    @default(now())
+
+  @@index([competitionCode])
+  @@index([competitionCode, utcDate])
+}
+
+// Upcoming scheduled matches, purely presentational (feeds team pickers only).
+// Denormalized team name/crest and no FK to Team: refreshed independently of
+// the standings/match cache, on its own TTL (Competition.fixturesFetchedAt).
+model Fixture {
+  id              Int         @id // football-data.org match id
+  competitionCode String
+  competition     Competition @relation(fields: [competitionCode], references: [code])
+  utcDate         DateTime
+  matchday        Int?
+  homeTeamId      Int
+  homeTeamName    String
+  homeTeamCrest   String?
+  awayTeamId      Int
+  awayTeamName    String
+  awayTeamCrest   String?
+  fetchedAt       DateTime    @default(now())
+
+  @@index([competitionCode, utcDate])
 }

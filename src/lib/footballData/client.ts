@@ -48,3 +48,7 @@ export function getStandings(competitionCode: string): Promise<FdStandingsRespon
 export function getFinishedMatches(competitionCode: string): Promise<FdMatchesResponse> {
   return fdFetch<FdMatchesResponse>(`/competitions/${competitionCode}/matches?status=FINISHED`);
 }
+
+export function getUpcomingMatches(competitionCode: string): Promise<FdMatchesResponse> {
+  return fdFetch<FdMatchesResponse>(`/competitions/${competitionCode}/matches?status=SCHEDULED`);
+}

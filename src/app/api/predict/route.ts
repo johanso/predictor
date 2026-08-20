@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { ensureFreshStandings } from "@/lib/cache/standingsCache";
+import { ensureFreshStandings, getWeightedTeamStats } from "@/lib/cache/standingsCache";
 import { predictMatch } from "@/lib/poisson";
 
 const bodySchema = z.object({
@@ -38,7 +38,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const prediction = predictMatch(homeTeamId, awayTeamId, standings.teams);
+    const teamStats = await getWeightedTeamStats(competitionCode);
+    const prediction = predictMatch(homeTeamId, awayTeamId, teamStats);
     return NextResponse.json(prediction);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to compute prediction.";

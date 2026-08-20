@@ -2,7 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getCompetitionInfo } from "@/lib/footballData/competitions";
 import { ensureFreshStandings } from "@/lib/cache/standingsCache";
+import { ensureFreshFixtures, type FixtureRow } from "@/lib/cache/fixturesCache";
 import { PredictorClient } from "@/components/PredictorClient";
+import { StandingsTable } from "@/components/StandingsTable";
 
 function Banner({ tone, children }: { tone: "red" | "gold"; children: React.ReactNode }) {
   const toneClass = tone === "red" ? "border-red bg-red-dim text-red" : "border-gold bg-gold-dim text-gold";
@@ -20,6 +22,13 @@ export default async function LeaguePage({ params }: { params: Promise<{ code: s
     standings = await ensureFreshStandings(code);
   } catch (err) {
     loadError = err instanceof Error ? err.message : "No se pudieron cargar los standings.";
+  }
+
+  let fixtures: FixtureRow[] = [];
+  try {
+    fixtures = await ensureFreshFixtures(code);
+  } catch {
+    fixtures = []; // fixtures are a nice-to-have, never turn into a page-level error
   }
 
   return (
@@ -50,11 +59,23 @@ export default async function LeaguePage({ params }: { params: Promise<{ code: s
         )}
 
         {standings && standings.hasHomeAway && standings.seasonStarted && (
-          <PredictorClient
-            competitionCode={code}
-            teams={standings.teams.map((t) => ({ teamId: t.teamId, teamName: t.teamName }))}
-            fetchedAt={standings.fetchedAt ? standings.fetchedAt.toISOString() : null}
-          />
+          <>
+            <StandingsTable rows={standings.table} />
+            <PredictorClient
+              competitionCode={code}
+              teams={standings.teams.map((t) => ({ teamId: t.teamId, teamName: t.teamName }))}
+              fetchedAt={standings.fetchedAt ? standings.fetchedAt.toISOString() : null}
+              fixtures={fixtures.map((f) => ({
+                id: f.id,
+                utcDate: f.utcDate.toISOString(),
+                matchday: f.matchday,
+                homeTeamId: f.homeTeamId,
+                homeTeamName: f.homeTeamName,
+                awayTeamId: f.awayTeamId,
+                awayTeamName: f.awayTeamName,
+              }))}
+            />
+          </>
         )}
       </main>
     </>

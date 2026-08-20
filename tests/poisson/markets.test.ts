@@ -114,10 +114,16 @@ describe("predictMatch end-to-end", () => {
   ];
 
   it("reproduces the same ballpark 1X2 result via the public predictMatch() API", () => {
+    // Values include the Dixon-Coles low-score correction (src/lib/poisson/dixonColes.ts),
+    // re-pinned from real predictMatch() output — not hand-derived. Draw probability is
+    // pulled up and home-win probability down slightly versus the pre-correction numbers,
+    // as expected (rho<0 shifts mass toward low, correlated scorelines like 1-1).
     const prediction = predictMatch(1, 2, teams);
-    expect(prediction.oneXTwo.homeWin.probability).toBeCloseTo(0.6813112194315069, 1);
-    expect(prediction.oneXTwo.homeWin.odds).toBeCloseTo(1.4677580105526669, 1);
-    expect(prediction.doubleChance.oneX.probability).toBeCloseTo(0.9123227537368734, 1);
+    expect(prediction.oneXTwo.homeWin.probability).toBeCloseTo(0.6771049870290008, 6);
+    expect(prediction.oneXTwo.homeWin.odds).toBeCloseTo(1.4768758451887896, 6);
+    expect(prediction.oneXTwo.draw.probability).toBeCloseTo(0.2524832548055539, 6);
+    expect(prediction.oneXTwo.awayWin.probability).toBeCloseTo(0.07041175816544491, 6);
+    expect(prediction.doubleChance.oneX.probability).toBeCloseTo(0.9295882418345547, 6);
     const total = prediction.oneXTwo.homeWin.probability + prediction.oneXTwo.draw.probability + prediction.oneXTwo.awayWin.probability;
     expect(total).toBeCloseTo(1, 5);
   });
