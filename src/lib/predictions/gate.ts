@@ -11,7 +11,7 @@ import type { ConfidenceLevel } from "@/types/domain";
  * guaranteed the calibration chart would never learn anything about the other 84%
  * of predictions, including the ones where the model is most likely to be wrong.
  *
- * The user pressing "Enviar a autoevaluación" is the filter. All this rejects is a
+ * The user pressing "Seguir este pronóstico" is the filter. All this rejects is a
  * prediction built on too little data to be worth scoring at all.
  */
 export function qualifiesForTracking(confidenceLevel: ConfidenceLevel): boolean {

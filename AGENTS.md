@@ -4,151 +4,153 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
-# Bitácora del proyecto
+# Project log
 
-Léela antes de tocar el modelo, la interfaz de apuestas o las llamadas a APIs externas.
-Varias decisiones de aquí son deliberadas y contraintuitivas: revertirlas "simplificando"
-rompe cosas que costaron medirse.
+Read this before touching the model, the betting UI, or the external API calls. Several
+decisions here are deliberate and counter-intuitive; reverting them in the name of
+"simplifying" breaks things that were expensive to measure.
 
-## Qué es y para qué
+**Language convention:** code, comments and documentation in English. User-facing strings —
+the UI and the error messages the app surfaces — stay in Spanish, as does the console output
+of the `scripts/` backtests, because the owner reads them.
 
-App local de un solo usuario que estima probabilidades de mercados de fútbol y las compara
-con las cuotas reales de una casa de apuestas. El usuario apuesta dinero propio en cantidades
-pequeñas y hace por su cuenta la investigación extradeportiva (lesiones, alineaciones,
-rotaciones). **El trabajo de la app es dar una probabilidad base bien calibrada y ponerla al
-lado del precio real** — no decidir por él.
+## What this is and who it's for
 
-Cubre las 10 competiciones del plan gratuito de football-data.org. El foco práctico ha sido
-el Brasileirão porque es la única con temporada en curso durante el desarrollo.
+A single-user local app that estimates football market probabilities and puts them next to the
+real prices a bookmaker is offering. The owner bets his own money in small amounts and does the
+off-pitch research himself — injuries, line-ups, rotation. **The app's job is a well-calibrated
+base probability shown beside the real price**, not deciding for him.
 
-## La realidad medida — no la vendas mejor de lo que es
+Covers the 10 competitions on football-data.org's free plan. Practical focus has been the
+Brasileirão, the only league in season during development.
 
-Backtest walk-forward sobre 5 ligas y 3735 partidos (`scripts/`), sin mirar el futuro:
+## What is actually measured — don't oversell it
 
-| | Ventaja sobre las tasas base de la liga |
+Walk-forward backtest across 5 leagues and 3735 matches (`scripts/`), no lookahead:
+
+| | Edge over the league's own base rates |
 |---|---|
-| Fórmula original (cocientes de promedios) | +4.10% |
-| **Fórmula actual (Dixon-Coles ajustado)** | **+5.42%**, t=4.55 |
+| Original formula (ratio of averages) | +4.10% |
+| **Current formula (fitted Dixon-Coles)** | **+5.42%**, t=4.55 |
 
-Por liga: España +6.46%, Italia +7.51%, Inglaterra +5.68%, Alemania +4.98%, Brasil +2.27%.
-Mejora en 5 de 5 ligas con ajustes idénticos, sin retocar nada por país.
+By league: Spain +6.46%, Italy +7.51%, England +5.68%, Germany +4.98%, Brazil +2.27%. Better in
+5 of 5 with identical settings, nothing tuned per country.
 
-**Lo que esto NO significa:** que le gane al mercado. Para ganar dinero hace falta superar la
-habilidad de la casa *más* su margen (~5-7%), y las casas rondan 8-12% de habilidad sobre las
-tasas base. Brasil, además, es la liga más difícil de las cinco.
+**What this does NOT mean:** that it beats the market. Profiting requires exceeding the
+bookmaker's own skill *plus* its margin (~5-7%), and bookmakers run 8-12% skill over base rates.
+Brazil is also the hardest of the five.
 
-Por mercado, medido en `scripts/markets.test.ts`: **ningún mercado mostró señal
-estadísticamente distinguible del azar** (todos con |t| < 2). Esos números viven en
-`src/lib/betting/reliability.ts` y se muestran en la interfaz al seleccionar un mercado, a
-propósito: un "valor positivo" significa que el modelo discrepa de la casa, no que tenga razón.
+Per market, measured in `scripts/markets.test.ts`: **no market showed skill distinguishable from
+chance** (all |t| < 2). Those figures live in `src/lib/betting/reliability.ts` and are shown in
+the UI when a market is selected, deliberately — a "positive value" means the model disagrees
+with the bookmaker, not that it is right.
 
-Si mejoras el modelo, **vuelve a correr los backtests y actualiza estos números** — aquí, en
-`reliability.ts` y en el README.
+If you improve the model, **re-run the backtests and update these numbers** — here, in
+`reliability.ts`, and in the README.
 
-## Arquitectura
+## Architecture
 
 ```
 football-data.org ──> standingsCache ──> Match/TeamStanding (SQLite)
    (10 req/min)            │
-                           ├──> ratingsCache ──> ajuste Dixon-Coles (memoria)
+                           ├──> ratingsCache ──> Dixon-Coles fit (in memory)
                            │                          │
                            └──> predict.ts <──────────┘
                                     │
 odds-api.io ──────> oddsCache ──> OddsSnapshot ──> BetSlipCard
-   (500 req/día)                                        │
+   (500 req/day)                                        │
                                                    Bet / Bankroll
 ```
 
-- `src/lib/poisson/` — cálculo puro, sin red ni DB. Es donde vive el modelo.
-- `src/lib/oddsApi/` — cliente de cuotas, mapeo de mercados, emparejado de partidos, cuota de uso.
-- `src/lib/cache/` — las tres capas de caché (clasificación, ratings ajustados, cuotas).
-- `src/lib/betting/` — Kelly, liquidación de apuestas, fiabilidad medida por mercado.
-- `src/lib/predictions/` — seguimiento y evaluación de pronósticos.
-- `scripts/` — backtests offline. No se ejecutan con `npm test` (ver más abajo).
+- `src/lib/poisson/` — pure computation, no network or DB. The model lives here.
+- `src/lib/oddsApi/` — odds client, market mapping, fixture matching, quota accounting.
+- `src/lib/cache/` — the three cache layers (standings, fitted ratings, odds).
+- `src/lib/betting/` — Kelly, bet settlement, measured per-market reliability.
+- `src/lib/predictions/` — prediction tracking and evaluation.
+- `scripts/` — offline backtests. Excluded from `npm test` (see below).
 
-### Modelo: dos caminos
+### Two estimation paths
 
-1. **Principal** — `dixonColesFit.ts` ajusta ataque y defensa de cada equipo, ventaja de local y
-   rho, todo por máxima verosimilitud sobre los partidos cacheados, con Adam sobre el gradiente
-   analítico. Mide la fuerza *relativa al rival enfrentado*.
-2. **Respaldo** — `teamStats.ts` + `matchup.ts`, cocientes de promedios (Maher 1982). Se usa solo
-   si la caché de `Match` aún no tiene datos para esa competición.
+1. **Primary** — `dixonColesFit.ts` fits every team's attack and defense, plus home advantage and
+   rho, by maximum likelihood over the cached matches, using Adam on the analytic gradient. It
+   measures strength *relative to the opposition actually faced*.
+2. **Fallback** — `teamStats.ts` + `matchup.ts`, ratio of averages (Maher 1982). Used only when
+   the `Match` cache has no data for that competition yet.
 
-Ambos desembocan en `buildPredictionFromLambdas()`, así que solo pueden diferir en cómo llegan
-a λ, nunca en cómo derivan los mercados.
+Both feed `buildPredictionFromLambdas()`, so they can differ only in how they arrive at λ, never
+in how the markets are derived from it.
 
-## Decisiones que NO hay que revertir
+## Decisions not to revert
 
-Cada una tiene su porqué en el código; esto es el índice.
+Each is justified in the code; this is the index.
 
-| Decisión | Por qué |
+| Decision | Why |
 |---|---|
-| **Los pronósticos en seguimiento son inmutables** (`api/predictions/route.ts`) | Hubo un "Actualizar envío" que sobrescribía el registro y reiniciaba su fecha. Permitía sustituir un pronóstico por otro mejor informado tras jugarse más partidos, y las estadísticas pasaban a medir predicciones con ventaja de información. |
-| **El seguimiento filtra por calidad de datos, no por confianza del modelo** (`predictions/gate.ts`) | Había un piso del 58% que dejaba pasar el 16% de los partidos, todos de la misma franja estrecha. La calibración solo se puede medir viendo todo el rango, así que filtrar antes de guardar cegaba el gráfico justo donde el modelo más se equivoca. |
-| **La tabla de apuestas ordena por puntos de probabilidad, no por EV%** (`BetSlipCard.tsx`) | EV% divide por el stake e infla las cuotas largas: 4 puntos de ventaja son +17% a cuota 3.90 y +9% a 2.20. Ordenar por EV% empuja siempre hacia los longshots, donde un error pequeño del modelo hace más daño. |
-| **Los límites de rho salen del producto (techo) y del mayor (piso)** (`dixonColes.ts:rhoBounds`) | Estaban invertidos y permitían un rho que hacía negativa la probabilidad del 0-0. Es fácil de confundir; hay tests que lo fijan. |
-| **La forma de tau conserva la masa exactamente** (`dixonColes.ts`) | Los términos en rho se cancelan algebraicamente. Existe una variante circulando por ahí que no cumple esto — no la "corrijas" hacia ella. Hay un test que fija la propiedad. |
-| **`united` y `city` NO son palabras ignorables** (`oddsApi/matchTeams.ts`) | Son lo único que separa a Manchester United de Manchester City. Con ellas en la lista, ambos puntuaban 1.000 e intercambiaban cuotas. |
-| **El contador de cuota de odds-api vive en la base de datos** (`oddsApi/quota.ts`) | En memoria se reiniciaba con cada recarga del servidor y habría autorizado la petición 501 informando "0 usadas hoy". El de football-data sí puede estar en memoria: su ventana es de 60 segundos. |
+| **Tracked predictions are immutable** (`api/predictions/route.ts`) | An "update submission" button used to overwrite the record and reset its timestamp. It let a forecast be replaced by a better-informed one after more matches had been played, so the statistics measured predictions made with hindsight. |
+| **Tracking gates on data quality, not model confidence** (`predictions/gate.ts`) | A 58% floor passed only 16% of fixtures, all from one narrow band. Calibration can only be measured across the full range, so filtering before storing blinded the chart exactly where the model is most likely wrong. |
+| **The bet slip ranks by probability points, not EV%** (`BetSlipCard.tsx`) | EV% divides by the stake and inflates long odds: 4 points of edge reads as +17% at 3.90 and +9% at 2.20. Ranking by EV% steers every recommendation toward longshots, where a small model error does the most damage. |
+| **Rho bounds: ceiling from the product, floor from the larger rate** (`dixonColes.ts:rhoBounds`) | They were inverted and allowed a rho that made the probability of a 0-0 negative. Easy to get backwards; tests pin it. |
+| **The tau form preserves mass exactly** (`dixonColes.ts`) | The rho terms cancel algebraically. A variant circulating elsewhere does not have this property — do not "correct" toward it. A test pins the property. |
+| **`united` and `city` are NOT noise words** (`oddsApi/matchTeams.ts`) | They are the only thing separating Manchester United from Manchester City. With them on the list both scored 1.000 and swapped odds. |
+| **The odds-api quota counter lives in the database** (`oddsApi/quota.ts`) | In memory it reset on every server reload and would have authorised the 501st request while reporting "0 used today". The football-data counter can stay in memory: its window is 60 seconds. |
 
-## APIs externas y disciplina de cuota
+## External APIs and quota discipline
 
-**football-data.org** — 10 req/min. Caché de 6h en `standingsCache`, contador en memoria
-(`footballData/rateLimiter.ts`), badge en pantalla.
+**football-data.org** — 10 req/min. 6h cache in `standingsCache`, in-memory counter
+(`footballData/rateLimiter.ts`), on-screen badge.
 
-**odds-api.io** — 100/hora y 500/día. La disciplina está en `oddsCache.ts`:
-- `/odds/multi` precia **10 partidos por petición**: una jornada completa cuesta una llamada.
-- Caché de 30 min, y un freno de 5 min entre refrescos de la misma competición.
-- Medido: preciar una jornada entera del Brasileirão = **4 peticiones**.
-- Comprueba ambas ventanas antes de enviar; si una está llena, no envía.
+**odds-api.io** — 100/hour and 500/day. The discipline lives in `oddsCache.ts`:
+- `/odds/multi` prices **10 fixtures per request**: a whole matchday costs one call.
+- 30-minute cache, plus a 5-minute floor between refreshes of the same competition.
+- Measured: pricing a full Brasileirão round = **4 requests**.
+- Both windows are checked before sending; a full one is refused rather than sent.
 
-Rarezas de odds-api.io descubiertas a golpes:
-- **Pedir varias casas donde una no está disponible anula la respuesta entera.** No devuelve las
-  que sí tiene. Por eso se piden solo las seleccionadas en la cuenta.
-- El plan gratuito deja seleccionar 2 casas, pero **en la práctica solo Bet365 devuelve datos**
-  (se probaron Betano BR, Betnacional, Betsson, 1xBet, Betway, 888Sport, Bet7k: ninguna responde).
-- Publica feeds reducidos junto al principal ("Bet365 (no latency)", 3-4 mercados). Se filtran
-  por `MIN_USEFUL_MARKETS`.
-- `sport` es obligatorio en `/events` aunque filtres por `league`.
+odds-api.io quirks found the hard way:
+- **Requesting several bookmakers where one is unavailable voids the entire response.** It does
+  not return the ones it has. Hence only the account's selected bookmakers are requested.
+- The free plan allows selecting 2 bookmakers, but **in practice only Bet365 returns data**
+  (Betano BR, Betnacional, Betsson, 1xBet, Betway, 888Sport and Bet7k were all tested: none respond).
+- It publishes reduced side-feeds next to the main one ("Bet365 (no latency)", 3-4 markets).
+  Filtered out by `MIN_USEFUL_MARKETS`.
+- `sport` is mandatory on `/events` even when filtering by `league`.
 
-## Cómo correr las cosas
+## Running things
 
 ```bash
-npm run dev        # servidor
-npm test           # 112 tests — NO incluye scripts/
+npm run dev        # dev server
+npm test           # 112 tests — does NOT include scripts/
 npx tsc --noEmit   # typecheck
 npx eslint .       # lint
 
-# Backtests offline (necesitan datos descargados, ver más abajo)
-npx vitest run --config vitest.backtest.config.ts scripts/leagues.test.ts   # ¿generaliza?
-npx vitest run --config vitest.backtest.config.ts scripts/compare.test.ts   # ajustado vs original
-npx vitest run --config vitest.backtest.config.ts scripts/markets.test.ts   # fiabilidad por mercado
-npx vitest run --config vitest.backtest.config.ts scripts/threshold.test.ts # umbrales
+# Offline backtests (need downloaded data, see below)
+npx vitest run --config vitest.backtest.config.ts scripts/leagues.test.ts   # does it generalise?
+npx vitest run --config vitest.backtest.config.ts scripts/compare.test.ts   # fitted vs original
+npx vitest run --config vitest.backtest.config.ts scripts/markets.test.ts   # per-market reliability
+npx vitest run --config vitest.backtest.config.ts scripts/threshold.test.ts # thresholds
 ```
 
-Los backtests leen volcados de temporada en `data/{LIGA}/{AÑO}.json`, que **no están en el repo**
-(~1 MB cada uno, `/data/` está en `.gitignore`). Para descargarlos, el comando está documentado
-en la cabecera de `scripts/backtestLib.ts`. El plan gratuito sirve temporadas pasadas con
-`?season=YYYY`, pero solo desde 2023 y a 10 peticiones por minuto.
+Backtests read season dumps from `data/{LEAGUE}/{YEAR}.json`, which are **not in the repo**
+(~1 MB each; `/data/` is gitignored). The download command is documented at the top of
+`scripts/backtestLib.ts`. The free plan serves past seasons via `?season=YYYY`, but only from
+2023 onward and at 10 requests per minute.
 
-## Trampas conocidas
+## Known traps
 
-- **Tras añadir un modelo a Prisma hay que reiniciar el servidor de desarrollo.** Node conserva
-  el cliente generado anterior en memoria y el modelo nuevo llega como `undefined`. Hay guardas
-  que lo dicen con todas las letras en `oddsCache.ts` y `quota.ts`.
-- **Vitest no carga `.env`.** Next.js sí. Un script en `scripts/` que necesite claves tiene que
-  hacer `Object.assign(process.env, dotenv.parse(fs.readFileSync(".env")))` antes de importar
-  nada que las use.
-- **`dotenv.config()` imprime un banner en stdout.** Si capturas su salida en una variable de
-  shell, te llevas el banner además del valor. Usa `dotenv.parse`.
-- Los nombres de equipo difieren entre los dos proveedores. `matchTeams.ts` los concilia y
-  **devuelve null antes que adivinar** — una casilla vacía es preferible a la cuota de otro partido.
+- **Adding a Prisma model requires restarting the dev server.** Node keeps the previously
+  generated client in memory and the new model arrives as `undefined`. Guards in `oddsCache.ts`
+  and `quota.ts` say so explicitly.
+- **Vitest does not load `.env`.** Next.js does. A script in `scripts/` that needs keys must do
+  `Object.assign(process.env, dotenv.parse(fs.readFileSync(".env")))` before importing anything
+  that reads them.
+- **`dotenv.config()` prints a banner to stdout.** Capturing its output into a shell variable
+  captures the banner along with the value. Use `dotenv.parse`.
+- Team names differ between the two providers. `matchTeams.ts` reconciles them and **returns null
+  rather than guessing** — an empty cell beats another fixture's odds.
 
-## Estado del producto
+## Product state
 
-Funcionando: predicción con modelo ajustado, comparación con cuotas reales de Bet365 con
-autorrelleno, cálculo de valor y Kelly, registro de apuestas con banca, seguimiento de
-pronósticos con calibración.
+Working: prediction with the fitted model, comparison against real Bet365 prices with autofill,
+value and Kelly computation, bet logging with a bankroll, and prediction tracking with calibration.
 
-Lo más útil que falta: **registro de la cuota de cierre (CLV)**. Es la única forma de detectar
-ventaja real en ~50 apuestas en vez de miles. Si el usuario lo pide, es el siguiente paso natural.
+The most useful thing missing: **closing-line value (CLV) logging**. It is the only way to detect
+a real edge in ~50 bets instead of thousands. If the owner asks, that is the natural next step.

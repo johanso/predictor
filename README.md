@@ -1,106 +1,110 @@
-# Predictor de Fútbol
+# Football Predictor
 
-Aplicación **Next.js 16** que estima probabilidades de los mercados de apuestas de fútbol
-(1X2, marcador exacto, ambos anotan, doble oportunidad, over/under, marca cada equipo) y las
-compara con las **cuotas reales** de una casa de apuestas para calcular valor esperado y stake.
+A **Next.js 16** app that estimates probabilities for football betting markets (1X2, correct
+score, both teams to score, double chance, over/under, team to score) and compares them against
+the **real prices** a bookmaker is offering, to compute expected value and stake size.
 
-Datos deportivos de [football-data.org](https://www.football-data.org) y cuotas de
-[odds-api.io](https://odds-api.io), ambos en plan gratuito. Cubre las 10 competiciones del plan.
+Match data from [football-data.org](https://www.football-data.org), odds from
+[odds-api.io](https://odds-api.io), both on free plans. Covers the 10 competitions the free plan
+includes.
 
-> Para trabajar en el código, lee primero [AGENTS.md](AGENTS.md): tiene la bitácora del
-> proyecto, las decisiones de diseño que no conviene revertir y las trampas conocidas.
+> Before working on the code, read [AGENTS.md](AGENTS.md): it holds the project log, the design
+> decisions that should not be reverted, and the known traps.
 
-## Cómo funciona el modelo
+## How the model works
 
-Cada equipo recibe un parámetro de **ataque** y otro de **defensa**, ajustados todos a la vez
-por **máxima verosimilitud** junto con la ventaja de local y el rho de Dixon-Coles, de modo que
-maximicen la probabilidad de todos los resultados realmente observados
-(`src/lib/poisson/dixonColesFit.ts`):
+Every team gets an **attack** and a **defense** parameter, fitted jointly by **maximum
+likelihood** along with home advantage and the Dixon-Coles rho, chosen to maximise the
+likelihood of every result actually observed (`src/lib/poisson/dixonColesFit.ts`):
 
 ```
-λ_local     = exp(ataque[local]     + defensa[visitante] + ventajaLocal)
-λ_visitante = exp(ataque[visitante] + defensa[local])
+λ_home = exp(attack[home] + defense[away] + homeAdvantage)
+λ_away = exp(attack[away] + defense[home])
 ```
 
-Al ser un ajuste conjunto, la fuerza queda medida **relativa al rival que se enfrentó**: golear
-al colista no cuenta igual que golear al líder. La optimización usa Adam sobre el gradiente
-analítico, con decaimiento temporal y regularización L2.
+Because the fit is joint, strength is measured **relative to the opposition actually faced**:
+thrashing the bottom side does not count the same as thrashing the leader. Optimisation is Adam
+on the analytic gradient, with exponential time decay and L2 regularisation.
 
-Con esos dos λ se construye una matriz de Poisson bivariante (0-10 goles por lado), corregida
-por Dixon-Coles en los marcadores bajos, de la que salen todos los mercados.
+Those two λ build a bivariate Poisson matrix (0-10 goals per side), corrected by Dixon-Coles on
+the low scorelines, from which every market is derived.
 
-Todo se ajusta por liga: la ventaja de local sale **1.43x en Brasil y 1.25x en Italia**, y el rho
-va de −0.124 a +0.007 según la competición.
+Everything is fitted per league: home advantage lands at **1.43x in Brazil and 1.25x in Italy**,
+and rho ranges from −0.124 to +0.007 depending on the competition.
 
-Existe además un camino de respaldo (cocientes de promedios, Maher 1982) que se usa solo si aún
-no hay partidos cacheados para esa competición.
+A fallback path also exists (ratio of averages, Maher 1982), used only when no matches are
+cached for that competition yet.
 
-### Qué tan bueno es
+### How good it is
 
-Backtest walk-forward sobre 5 ligas y 3735 partidos, sin mirar el futuro:
+Walk-forward backtest across 5 leagues and 3735 matches, no lookahead:
 
-| Liga | Fórmula original | Fórmula actual |
+| League | Original formula | Current formula |
 |---|---|---|
-| España | +4.76% | **+6.46%** |
-| Italia | +6.43% | **+7.51%** |
-| Inglaterra | +4.86% | **+5.68%** |
-| Alemania | +3.96% | **+4.98%** |
-| Brasil | +0.41% | **+2.27%** |
-| **Agrupado** | +4.10% | **+5.42%** (t=4.55) |
+| Spain | +4.76% | **+6.46%** |
+| Italy | +6.43% | **+7.51%** |
+| England | +4.86% | **+5.68%** |
+| Germany | +3.96% | **+4.98%** |
+| Brazil | +0.41% | **+2.27%** |
+| **Pooled** | +4.10% | **+5.42%** (t=4.55) |
 
-Los porcentajes son mejora de log loss sobre las tasas base de la liga. Mejora en las 5 con
-ajustes idénticos, elegidos en 2023-24 y verificados en un 2025 que la búsqueda nunca vio.
+Figures are log-loss improvement over the league's own base rates. Better in all five with
+identical settings, chosen on 2023-24 and confirmed on a 2025 the search never saw.
 
-**Esto no significa que le gane al mercado.** Una casa de apuestas ronda 8-12% de habilidad y
-además cobra 5-7% de margen. La app existe para dar una base bien calibrada, no para garantizar
-ganancias. Medido por mercado, ninguno mostró señal estadísticamente distinguible del azar — esos
-números se muestran en la propia interfaz al seleccionar una apuesta.
+**This does not mean it beats the market.** A bookmaker runs 8-12% skill and additionally charges
+a 5-7% margin. The app exists to provide a well-calibrated baseline, not to guarantee profit.
+Measured per market, none showed skill distinguishable from chance — those numbers are shown in
+the UI itself when a bet is selected.
 
-## Requisitos
+## Requirements
 
 - Node.js 20+
-- API key gratuita de [football-data.org](https://www.football-data.org/client/register)
-- API key gratuita de [odds-api.io](https://odds-api.io) (opcional — sin ella la app funciona,
-  solo hay que escribir las cuotas a mano)
+- A free API key from [football-data.org](https://www.football-data.org/client/register)
+- A free API key from [odds-api.io](https://odds-api.io) (optional — without it the app still
+  works, odds just have to be typed in by hand)
 
 ## Setup
 
 ```bash
 npm install
-cp .env.example .env     # pegar las claves
-npx prisma migrate dev   # crea prisma/dev.db
+cp .env.example .env     # paste your keys
+npx prisma migrate dev   # creates prisma/dev.db
 npm run dev
 ```
 
-Abrir [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000).
 
 ## Scripts
 
-- `npm run dev` — servidor de desarrollo
-- `npm run build` — build de producción
+- `npm run dev` — dev server
+- `npm run build` — production build
 - `npm test` — 112 tests (Vitest)
-- `npx prisma studio` — inspeccionar la base SQLite
+- `npx prisma studio` — inspect the SQLite database
 
-Los backtests offline se corren aparte y necesitan datos descargados; ver [AGENTS.md](AGENTS.md).
+Offline backtests run separately and need downloaded data; see [AGENTS.md](AGENTS.md).
 
-## Estructura
+## Layout
 
-- `src/lib/poisson/` — el modelo, puro y sin dependencias de red ni DB
-- `src/lib/oddsApi/` — cuotas reales: cliente, mercados, emparejado de partidos, control de cuota
-- `src/lib/betting/` — Kelly, liquidación, fiabilidad medida por mercado
-- `src/lib/predictions/` — seguimiento y evaluación de pronósticos
-- `src/lib/cache/` — capas de caché sobre SQLite
-- `scripts/` — backtests offline
-- `prisma/schema.prisma` — esquema de la base
+- `src/lib/poisson/` — the model, pure, with no network or DB dependencies
+- `src/lib/oddsApi/` — real odds: client, markets, fixture matching, quota accounting
+- `src/lib/betting/` — Kelly, settlement, measured per-market reliability
+- `src/lib/predictions/` — prediction tracking and evaluation
+- `src/lib/cache/` — cache layers over SQLite
+- `scripts/` — offline backtests
+- `prisma/schema.prisma` — database schema
 
-## Nota sobre las fuentes de datos
+## A note on the data sources
 
-El endpoint `/standings` del plan gratuito de football-data.org solo devuelve la tabla `TOTAL`,
-sin splits local/visitante. La app descarga los partidos finalizados
-(`/matches?status=FINISHED`) y los agrega equipo por equipo
-(`src/lib/cache/standingsCache.ts:aggregateFromMatches`). Ese mismo caché de partidos alimenta el
-ajuste del modelo.
+football-data.org's free `/standings` endpoint returns only the `TOTAL` table, with no home/away
+split. The app downloads finished matches (`/matches?status=FINISHED`) and aggregates them team
+by team (`src/lib/cache/standingsCache.ts:aggregateFromMatches`). That same match cache feeds the
+model fit.
 
-Las cuotas se piden por lotes de 10 partidos y se cachean 30 minutos: preciar una jornada completa
-cuesta 4 peticiones de las 500 diarias. En el plan gratuito de odds-api.io solo Bet365 devuelve
-datos en la práctica.
+Odds are requested in batches of 10 fixtures and cached for 30 minutes: pricing a full matchday
+costs 4 of the 500 daily requests. On odds-api.io's free plan, only Bet365 returns data in
+practice.
+
+## Language convention
+
+Code, comments and documentation are in English. User-facing strings — the UI and the error
+messages the app surfaces — are in Spanish, as is the console output of the `scripts/` backtests.
