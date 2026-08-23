@@ -22,4 +22,16 @@ export const config = {
       return process.env.FOOTBALL_DATA_BASE_URL ?? "https://api.football-data.org/v4";
     },
   },
+  oddsApi: {
+    get apiKey(): string {
+      return requireEnv("ODDS_API_KEY");
+    },
+    get baseUrl(): string {
+      return process.env.ODDS_API_BASE_URL ?? "https://api.odds-api.io/v3";
+    },
+    /** Absent until the key is set — lets the UI hide the odds features instead of erroring. */
+    get isConfigured(): boolean {
+      return Boolean(process.env.ODDS_API_KEY);
+    },
+  },
 };

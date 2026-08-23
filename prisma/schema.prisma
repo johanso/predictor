@@ -165,6 +165,28 @@ model Bet {
   @@index([createdAt])
 }
 
+// Real bookmaker prices from odds-api.io, cached so the free plan's 500 requests a
+// day are never the limiting factor. One row per (fixture, bookmaker); the whole
+// market set is stored as JSON because it is only ever read back as a unit and the
+// set of markets differs by bookmaker.
+//
+// Filled a whole matchday at a time via /odds/multi (10 fixtures per request), so a
+// full round costs one request rather than ten. Rows are refreshed on a TTL rather
+// than deleted — a stale price is still useful context, and the UI shows its age.
+model OddsSnapshot {
+  eventId         String // odds-api.io event id
+  bookmaker       String
+  competitionCode String
+  homeTeamName    String // as odds-api.io spells it, kept for debugging the fuzzy match
+  awayTeamName    String
+  matchUtcDate    DateTime
+  marketsJson     String // { "home": 1.55, "btts_yes": 1.95, ... } keyed by BetMarket
+  fetchedAt       DateTime @default(now())
+
+  @@id([eventId, bookmaker])
+  @@index([competitionCode, matchUtcDate])
+}
+
 // Singleton row (id always 1) holding the user's self-reported starting balance.
 // currentBalance is never stored — it's startingBalance + sum(profit) of settled Bets.
 model Bankroll {

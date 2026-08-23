@@ -22,6 +22,38 @@ const GROUPS: { title: string; markets: BetMarket[] }[] = [
 
 const LABELS = Object.fromEntries(BET_MARKETS.map((m) => [m.value, m.label])) as Record<BetMarket, string>;
 
+interface BookOdds {
+  bookmaker: string;
+  markets: Partial<Record<BetMarket, number>>;
+  fetchedAt: string;
+}
+
+interface FeedState {
+  /** Which fixture these odds belong to; anything else means we're still loading. */
+  loadedFor: string | null;
+  supported: boolean;
+  books: BookOdds[];
+  selected: string | null;
+  fetchedAt: string | null;
+  error: string | null;
+}
+
+/** Markets whose prices should sum to just over 1 at a fairly priced book. */
+const MARGIN_GROUPS: { label: string; markets: BetMarket[] }[] = [
+  { label: "1X2", markets: ["home", "draw", "away"] },
+  { label: "Ambos marcan", markets: ["btts_yes", "btts_no"] },
+  { label: "Over/Under 1.5", markets: ["over_1_5", "under_1_5"] },
+  { label: "Over/Under 2.5", markets: ["over_2_5", "under_2_5"] },
+];
+
+function minutesAgo(iso: string): string {
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "hace un momento";
+  if (mins < 60) return `hace ${mins} min`;
+  const hours = Math.round(mins / 60);
+  return `hace ${hours} h`;
+}
+
 export function BetSlipCard({
   competitionCode,
   homeTeamId,
@@ -60,6 +92,14 @@ export function BetSlipCard({
   }, [prediction]);
 
   const [oddsInputs, setOddsInputs] = useState<Partial<Record<BetMarket, string>>>({});
+  const [feed, setFeed] = useState<FeedState>({
+    loadedFor: null,
+    supported: true,
+    books: [],
+    selected: null,
+    fetchedAt: null,
+    error: null,
+  });
   const [selected, setSelected] = useState<BetMarket | null>(null);
   const [stakeInput, setStakeInput] = useState("");
   const [stakeTouched, setStakeTouched] = useState(false);
@@ -76,6 +116,68 @@ export function BetSlipCard({
       .catch(() => setBankroll(null));
   }, []);
 
+  // Real bookmaker prices, fetched once per fixture. The server caches them and
+  // batches a whole matchday into one upstream request, so this is cheap to call.
+  const fixtureDate = fixture?.utcDate;
+  const fixtureKey = fixtureDate ? `${competitionCode}|${prediction.homeTeam}|${prediction.awayTeam}|${fixtureDate}` : null;
+  // Derived rather than stored: if the loaded odds don't belong to the fixture on
+  // screen, we are still fetching. Avoids a setState purely to flag "loading".
+  const oddsLoading = fixtureKey !== null && feed.loadedFor !== fixtureKey;
+
+  useEffect(() => {
+    if (!fixtureDate || !fixtureKey) return;
+    let cancelled = false;
+
+    const params = new URLSearchParams({
+      competitionCode,
+      homeTeamName: prediction.homeTeam,
+      awayTeamName: prediction.awayTeam,
+      utcDate: fixtureDate,
+    });
+    fetch(`/api/odds?${params}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const books: BookOdds[] = d.odds ?? [];
+        setFeed({
+          loadedFor: fixtureKey,
+          supported: Boolean(d.configured && d.supported),
+          books,
+          selected: books[0]?.bookmaker ?? null,
+          fetchedAt: books[0]?.fetchedAt ?? null,
+          error: d.error ?? null,
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setFeed({
+          loadedFor: fixtureKey,
+          supported: false,
+          books: [],
+          selected: null,
+          fetchedAt: null,
+          error: "No se pudieron cargar las cuotas.",
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [competitionCode, prediction.homeTeam, prediction.awayTeam, fixtureDate, fixtureKey]);
+
+  function applyBook(bookmaker: string) {
+    const book = feed.books.find((b) => b.bookmaker === bookmaker);
+    if (!book) return;
+    setFeed((f) => ({ ...f, selected: bookmaker, fetchedAt: book.fetchedAt }));
+    setOddsInputs((prev) => {
+      const next = { ...prev };
+      for (const [market, price] of Object.entries(book.markets)) {
+        if (typeof price === "number" && price > 1) next[market as BetMarket] = price.toFixed(2);
+      }
+      return next;
+    });
+  }
+
   const oddsOf = (m: BetMarket) => Number(oddsInputs[m] ?? "");
   /** Expected value per unit staked: p x odds - 1. Positive means the model prices it higher than the book. */
   const edgeOf = (m: BetMarket) => {
@@ -85,6 +187,22 @@ export function BetSlipCard({
 
   const valueCount = BET_MARKETS.filter((m) => (edgeOf(m.value) ?? 0) > 0).length;
   const filledCount = BET_MARKETS.filter((m) => oddsOf(m.value) > 1).length;
+
+  // A complete two- or three-way market should imply just over 100%. Much more than
+  // that is a mistyped price far more often than a real margin, and both sides of the
+  // pair then read as nonsense — worth catching before it drives a bet.
+  const marginWarnings = MARGIN_GROUPS.flatMap((group) => {
+    const prices = group.markets.map(oddsOf);
+    if (prices.some((p) => !(p > 1))) return [];
+    const implied = prices.reduce((s, p) => s + 1 / p, 0);
+    if (implied < 1) {
+      return [`${group.label}: las cuotas suman ${(implied * 100).toFixed(1)}% — por debajo de 100%, revisa que sean de la misma casa.`];
+    }
+    if (implied > 1.12) {
+      return [`${group.label}: margen del ${((implied - 1) * 100).toFixed(1)}%, demasiado alto para un mercado principal. Revisa si te equivocaste al teclear.`];
+    }
+    return [];
+  });
 
   const selectedKelly =
     selected !== null && oddsOf(selected) > 1 && bankroll !== null
@@ -157,6 +275,49 @@ export function BetSlipCard({
         recuerda que eso solo significa que <strong className="text-ink">el modelo discrepa del mercado</strong>,
         no que tenga razón.
       </p>
+
+      {!oddsLoading && feed.books.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-end gap-3 border border-line bg-paper-raised p-3">
+          <label className="flex flex-col gap-1.5">
+            <span className="label-eyebrow text-xs text-ink-soft">Casa de apuestas</span>
+            <select
+              value={feed.selected ?? ""}
+              onChange={(e) => applyBook(e.target.value)}
+              className="border border-line bg-paper px-3 py-2 text-sm text-ink outline-none focus:border-pitch"
+            >
+              {feed.books.map((b) => (
+                <option key={b.bookmaker} value={b.bookmaker}>
+                  {b.bookmaker} ({Object.keys(b.markets).length} mercados)
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            onClick={() => feed.selected && applyBook(feed.selected)}
+            className="label-eyebrow border border-line px-3 py-2 text-xs text-ink-soft transition-colors hover:border-gold hover:text-gold"
+          >
+            Rellenar cuotas
+          </button>
+          {feed.fetchedAt && <span className="pb-2 text-[0.65rem] text-ink-soft">Actualizado {minutesAgo(feed.fetchedAt)}</span>}
+        </div>
+      )}
+
+      {!oddsLoading && feed.supported && feed.books.length === 0 && (
+        <p className="mb-4 text-[0.65rem] text-gold">
+          No se encontraron cuotas para este partido. Puedes escribirlas a mano igualmente.
+        </p>
+      )}
+      {feed.error && <p className="mb-4 text-[0.65rem] text-gold">{feed.error}</p>}
+
+      {marginWarnings.length > 0 && (
+        <div className="mb-4 border-l-4 border-red bg-red-dim px-3 py-2">
+          {marginWarnings.map((w) => (
+            <p key={w} className="text-[0.65rem] text-red">
+              {w}
+            </p>
+          ))}
+        </div>
+      )}
 
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
