@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getCompetitionInfo } from "@/lib/footballData/competitions";
-import { ensureFreshStandings, getWeightedTeamStats } from "@/lib/cache/standingsCache";
+import { ensureFreshStandings } from "@/lib/cache/standingsCache";
 import { ensureFreshFixtures, type FixtureRow } from "@/lib/cache/fixturesCache";
 import { getVenueStandings, getSeasonRecords, type VenueStandingsRow } from "@/lib/cache/formCache";
-import { predictMatch, buildSummary } from "@/lib/poisson";
+import { getMatchdayInsights } from "@/lib/matchdayInsights";
 import { LeaguePageClient } from "@/components/LeaguePageClient";
 import { Banner } from "@/components/ui/Banner";
 import { SeasonRecordsCard } from "@/components/SeasonRecordsCard";
-import type { FixtureFavorite } from "@/components/FixturesList";
+
 
 export default async function LeaguePage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
@@ -33,7 +33,7 @@ export default async function LeaguePage({ params }: { params: Promise<{ code: s
   let homeStandings: VenueStandingsRow[] = [];
   let awayStandings: VenueStandingsRow[] = [];
   let seasonRecords: Awaited<ReturnType<typeof getSeasonRecords>> | null = null;
-  const fixturePredictions: Record<number, FixtureFavorite> = {};
+  const fixturePredictions: Awaited<ReturnType<typeof getMatchdayInsights>> = {};
   if (standings && standings.hasHomeAway && standings.seasonStarted) {
     [homeStandings, awayStandings, seasonRecords] = await Promise.all([
       getVenueStandings(code, "home"),
@@ -41,22 +41,11 @@ export default async function LeaguePage({ params }: { params: Promise<{ code: s
       getSeasonRecords(code),
     ]);
 
-    // Precomputed here (pure, no extra API calls) so "Próximos partidos" can show
-    // each match's favorite without the user opening the predictor for every one.
-    const teamStats = await getWeightedTeamStats(code);
-    for (const f of fixtures) {
-      try {
-        const prediction = predictMatch(f.homeTeamId, f.awayTeamId, teamStats);
-        const summary = buildSummary(prediction.homeTeam, prediction.awayTeam, prediction.oneXTwo, prediction.exactScores);
-        fixturePredictions[f.id] = {
-          favorite: summary.favorite,
-          favoriteLabel: summary.favoriteLabel,
-          favoriteProbability: summary.favoriteProbability,
-        };
-      } catch {
-        // one of the two teams has no home or away games logged yet — skip, no badge for this fixture
-      }
-    }
+    // Precomputed here so "Próximos partidos" can show each match's favourite and
+    // its best value without the user opening the predictor one fixture at a time.
+    // Same fitted model the predictor uses, and the odds come from cache — the whole
+    // matchday costs one upstream batch. See lib/matchdayInsights.ts.
+    Object.assign(fixturePredictions, await getMatchdayInsights(code, fixtures));
   }
 
   return (

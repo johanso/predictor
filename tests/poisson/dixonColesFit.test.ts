@@ -173,7 +173,6 @@ describe("fitDixonColes", () => {
   });
 
   it("weights recent matches more when a short half-life is set", () => {
-    const teamIds = [1, 2];
     const start = new Date("2025-01-01T00:00:00Z");
     // Team 1 thrashed team 2 long ago, then lost heavily to them recently.
     const matches: FitMatch[] = [

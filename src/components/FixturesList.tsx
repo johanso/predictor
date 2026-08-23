@@ -20,12 +20,21 @@ export interface FixtureFavorite {
   favorite: "home" | "draw" | "away";
   favoriteLabel: string;
   favoriteProbability: number;
+  /** Best positive edge against the real price, precomputed server-side. */
+  bestValue?: {
+    market: string;
+    label: string;
+    odds: number;
+    points: number;
+    ev: number;
+    bookmaker: string;
+  } | null;
 }
 
 const FAVORITE_TONE = { home: "text-pitch", away: "text-sky", draw: "text-gold" } as const;
 
 type VenueFilter = "all" | "home" | "away";
-type SortMode = "date" | "probability";
+type SortMode = "date" | "probability" | "value";
 
 interface FixtureGroup {
   dateKey: string;
@@ -86,6 +95,18 @@ function FixtureRow({
           {pred.favorite === "draw" ? "Empate" : pred.favoriteLabel} {formatPercent(pred.favoriteProbability)}
         </span>
       )}
+      <span className="font-numeric w-36 shrink-0 text-right text-[0.65rem]">
+        {pred?.bestValue ? (
+          <span
+            className="text-result-win"
+            title={`${pred.bestValue.label} a ${pred.bestValue.odds.toFixed(2)} en ${pred.bestValue.bookmaker}. El modelo la da ${(pred.bestValue.points * 100).toFixed(1)} puntos por encima de lo que implica la cuota.`}
+          >
+            {pred.bestValue.label} <span className="opacity-70">+{(pred.bestValue.points * 100).toFixed(1)} pp</span>
+          </span>
+        ) : (
+          <span className="text-ink-soft opacity-40">—</span>
+        )}
+      </span>
       <span className="shrink-0 text-lg text-ink-soft opacity-0 transition-opacity group-hover:opacity-100 hover:opacity-100">
         →
       </span>
@@ -150,6 +171,21 @@ export function FixturesList({
     });
   }, [filtered, predictions]);
 
+  // Ranked by percentage points of edge, matching the bet slip. Fixtures with no
+  // priced edge sink to the bottom rather than disappearing.
+  const sortedByValue = useMemo(() => {
+    return [...filtered].sort((a, b) => {
+      const va = predictions?.[a.id]?.bestValue?.points ?? -1;
+      const vb = predictions?.[b.id]?.bestValue?.points ?? -1;
+      return vb - va;
+    });
+  }, [filtered, predictions]);
+
+  const valueCount = useMemo(
+    () => filtered.filter((f) => predictions?.[f.id]?.bestValue).length,
+    [filtered, predictions]
+  );
+
   function jumpToDate(dateKey: string) {
     sectionRefs.current.get(dateKey)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -187,6 +223,14 @@ export function FixturesList({
           >
             Por probabilidad
           </button>
+          <button
+            onClick={() => setSortMode("value")}
+            disabled={valueCount === 0}
+            title={valueCount === 0 ? "Sin cuotas cargadas para esta jornada" : `${valueCount} partidos con valor positivo`}
+            className={`label-eyebrow border-l border-line px-2 py-1.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${sortMode === "value" ? "bg-ink text-paper" : "text-ink-soft hover:text-pitch"}`}
+          >
+            Por valor{valueCount > 0 && ` (${valueCount})`}
+          </button>
         </div>
       </div>
 
@@ -207,16 +251,8 @@ export function FixturesList({
       <div className="flex max-h-72 flex-col overflow-y-auto">
         {filtered.length === 0 && <p className="py-4 text-center text-xs text-ink-soft">Sin partidos que coincidan con el filtro.</p>}
 
-        {sortMode === "date"
-          ? groups.map((g) => (
-              <div key={g.dateKey} ref={(el) => void (el ? sectionRefs.current.set(g.dateKey, el) : sectionRefs.current.delete(g.dateKey))}>
-                <p className="label-eyebrow px-4 bg-slate-100 sticky top-0 border-b border-t border-line py-2 text-[0.65rem] text-ink-soft">{g.label}</p>
-                {g.fixtures.map((f) => (
-                  <FixtureRow key={f.id} f={f} pred={predictions?.[f.id]} onSelect={onSelect} />
-                ))}
-              </div>
-            ))
-          : sortedByProbability.map((f) => (
+        {sortMode !== "date"
+          ? (sortMode === "value" ? sortedByValue : sortedByProbability).map((f) => (
               <FixtureRow
                 key={f.id}
                 f={f}
@@ -224,6 +260,14 @@ export function FixturesList({
                 onSelect={onSelect}
                 dateLabel={new Date(f.utcDate).toLocaleDateString("es", { day: "2-digit", month: "short" })}
               />
+            ))
+          : groups.map((g) => (
+              <div key={g.dateKey} ref={(el) => void (el ? sectionRefs.current.set(g.dateKey, el) : sectionRefs.current.delete(g.dateKey))}>
+                <p className="label-eyebrow px-4 bg-slate-100 sticky top-0 border-b border-t border-line py-2 text-[0.65rem] text-ink-soft">{g.label}</p>
+                {g.fixtures.map((f) => (
+                  <FixtureRow key={f.id} f={f} pred={predictions?.[f.id]} onSelect={onSelect} />
+                ))}
+              </div>
             ))}
       </div>
     </Card>

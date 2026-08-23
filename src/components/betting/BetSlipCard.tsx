@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Pill";
 import { formatPercent } from "@/lib/format";
 import { computeKellyStake } from "@/lib/betting/kelly";
+import { marketProbabilities } from "@/lib/betting/marketProbabilities";
 import { BET_MARKETS, type BetMarket } from "@/lib/betting/settle";
 import { marketReliability, reliabilityVerdict, RELIABILITY_VERDICT_LABEL } from "@/lib/betting/reliability";
 import type { FixtureOption } from "@/components/FixturesList";
@@ -73,26 +74,10 @@ export function BetSlipCard({
     [fixtures, homeTeamId, awayTeamId]
   );
 
-  const marketProbabilities = useMemo<Record<BetMarket, number>>(() => {
-    const line15 = prediction.overUnder.find((ou) => ou.line === 1.5);
-    const line25 = prediction.overUnder.find((ou) => ou.line === 2.5);
-    return {
-      home: prediction.oneXTwo.homeWin.probability,
-      draw: prediction.oneXTwo.draw.probability,
-      away: prediction.oneXTwo.awayWin.probability,
-      btts_yes: prediction.btts.yes.probability,
-      btts_no: prediction.btts.no.probability,
-      over_1_5: line15?.over.probability ?? 0,
-      under_1_5: line15?.under.probability ?? 0,
-      over_2_5: line25?.over.probability ?? 0,
-      under_2_5: line25?.under.probability ?? 0,
-      double_1x: prediction.doubleChance.oneX.probability,
-      double_12: prediction.doubleChance.oneTwo.probability,
-      double_x2: prediction.doubleChance.xTwo.probability,
-      home_scores: prediction.derivedMarkets.homeOver05.probability,
-      away_scores: prediction.derivedMarkets.awayOver05.probability,
-    };
-  }, [prediction]);
+  const marketProbs = useMemo(
+    () => marketProbabilities(prediction, prediction.derivedMarkets),
+    [prediction]
+  );
 
   const [oddsInputs, setOddsInputs] = useState<Partial<Record<BetMarket, string>>>({});
   const [feed, setFeed] = useState<FeedState>({
@@ -185,7 +170,7 @@ export function BetSlipCard({
   /** Expected value per unit staked: p x odds - 1. Positive means the model prices it higher than the book. */
   const edgeOf = (m: BetMarket) => {
     const o = oddsOf(m);
-    return o > 1 ? marketProbabilities[m] * o - 1 : null;
+    return o > 1 ? marketProbs[m] * o - 1 : null;
   };
 
   /**
@@ -199,7 +184,7 @@ export function BetSlipCard({
    */
   const pointsOf = (m: BetMarket) => {
     const o = oddsOf(m);
-    return o > 1 ? marketProbabilities[m] - 1 / o : null;
+    return o > 1 ? marketProbs[m] - 1 / o : null;
   };
 
   // The two strongest positive edges, best first. Highlighted in the table so the
@@ -231,7 +216,7 @@ export function BetSlipCard({
 
   const selectedKelly =
     selected !== null && oddsOf(selected) > 1 && bankroll !== null
-      ? computeKellyStake(marketProbabilities[selected], oddsOf(selected), bankroll)
+      ? computeKellyStake(marketProbs[selected], oddsOf(selected), bankroll)
       : null;
 
   // Derived-state-during-render: changing the selected market puts the stake field
@@ -276,7 +261,7 @@ export function BetSlipCard({
           matchUtcDate: fixture.utcDate,
           market: selected,
           marketLabel: LABELS[selected],
-          modelProbability: marketProbabilities[selected],
+          modelProbability: marketProbs[selected],
           odds,
           stake: stakeValue,
           suggestedStake: selectedKelly?.suggestedStake ?? 0,
@@ -365,7 +350,7 @@ export function BetSlipCard({
                   </td>
                 </tr>
                 {group.markets.map((m) => {
-                  const p = marketProbabilities[m];
+                  const p = marketProbs[m];
                   const edge = edgeOf(m);
                   const isValue = edge !== null && edge > 0;
                   const done = registered.includes(m);

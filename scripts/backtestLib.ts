@@ -41,6 +41,14 @@ export interface Match {
   awayGoals: number;
 }
 
+/** The subset of football-data.org's match payload these scripts read. */
+interface RawMatch {
+  utcDate: string;
+  homeTeam: { id: number };
+  awayTeam: { id: number };
+  score: { fullTime: { home: number | null; away: number | null } };
+}
+
 const seasonCache = new Map<string, Match[]>();
 
 /** Competition codes with at least one downloaded season, in directory order. */
@@ -64,15 +72,17 @@ export function loadSeason(year: number, league = "BSA"): Match[] {
   const cached = seasonCache.get(key);
   if (cached) return cached;
 
-  const raw = JSON.parse(fs.readFileSync(path.join(DATA_DIR, league, `${year}.json`), "utf8"));
+  const raw = JSON.parse(fs.readFileSync(path.join(DATA_DIR, league, `${year}.json`), "utf8")) as {
+    matches: RawMatch[];
+  };
   const matches: Match[] = raw.matches
-    .filter((m: any) => m.score?.fullTime?.home !== null && m.score?.fullTime?.away !== null)
-    .map((m: any) => ({
+    .filter((m) => m.score?.fullTime?.home !== null && m.score?.fullTime?.away !== null)
+    .map((m) => ({
       date: new Date(m.utcDate),
       homeId: m.homeTeam.id,
       awayId: m.awayTeam.id,
-      homeGoals: m.score.fullTime.home,
-      awayGoals: m.score.fullTime.away,
+      homeGoals: m.score.fullTime.home as number,
+      awayGoals: m.score.fullTime.away as number,
     }))
     .sort((a: Match, b: Match) => a.date.getTime() - b.date.getTime());
 
