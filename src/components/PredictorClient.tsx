@@ -8,7 +8,6 @@ import { FixturesList, type FixtureOption, type FixtureFavorite } from "@/compon
 import { SummaryCard } from "@/components/ResultsPanel/SummaryCard";
 import { ExpectedGoalsCard } from "@/components/ResultsPanel/ExpectedGoalsCard";
 import { TopScoresCard } from "@/components/ResultsPanel/TopScoresCard";
-import { ConfidenceBadge } from "@/components/ResultsPanel/ConfidenceBadge";
 import { OneXTwoCard } from "@/components/ResultsPanel/OneXTwoCard";
 import { ExactScoreGrid } from "@/components/ResultsPanel/ExactScoreGrid";
 import { BttsCard } from "@/components/ResultsPanel/BttsCard";
@@ -209,69 +208,63 @@ export function PredictorClient({
             </div>
           </div>
 
-          <div className="flex flex-col gap-4 md:flex-row md:items-start">
-            <div className="flex-1">
-              <SummaryCard summary={prediction.summary} />
-            </div>
-            <div className="flex flex-col items-start gap-2">
-              <ConfidenceBadge confidence={prediction.confidence} />
-              {(() => {
-                const qualifies = qualifiesForTracking(prediction.confidence.level);
-
-                // Already evaluated (the match this exact matchup was tracked for has been played) — nothing more to send.
-                if (tracked?.evaluatedAt) {
-                  return (
-                    <div className="flex flex-col gap-1">
-                      <Pill tone={tracked.correctOneXTwo ? "pitch" : "red"}>
-                        Evaluado: {tracked.correctOneXTwo ? "acertó ✓" : "falló ✗"}
-                      </Pill>
-                      <p className="text-[0.65rem] text-ink-soft">
-                        Resultado real: {tracked.actualHomeGoals}-{tracked.actualAwayGoals}
-                      </p>
-                    </div>
-                  );
-                }
-
-                // Just submitted in this session, or there was already a pending record for this exact matchup.
-                if (saveStatus === "saved" || tracked?.evaluatedAt === null) {
-                  return (
-                    <div className="flex flex-col gap-1 print:hidden">
-                      <Pill tone="gold">Ya enviado a autoevaluación (pendiente)</Pill>
-                      <button
-                        onClick={handleSaveForEvaluation}
-                        disabled={!qualifies || saveStatus === "saving"}
-                        className="label-eyebrow w-fit border border-line px-3 py-2 text-xs text-ink-soft transition-colors hover:border-gold hover:text-gold disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        {saveStatus === "saving" ? "Actualizando…" : "Actualizar envío"}
-                      </button>
-                    </div>
-                  );
-                }
-
+          <SummaryCard
+            summary={prediction.summary}
+            confidence={prediction.confidence}
+            action={(() => {
+              // A tracked prediction is deliberately immutable. There used to be an
+              // "update submission" button here that overwrote the stored record and
+              // reset its timestamp — which quietly let a forecast be replaced by a
+              // better-informed one after more matches had been played, so the
+              // accuracy stats stopped measuring what was actually predicted.
+              if (tracked?.evaluatedAt) {
                 return (
-                  <div className="flex flex-col gap-1 print:hidden">
-                    <button
-                      onClick={handleSaveForEvaluation}
-                      disabled={!qualifies || saveStatus === "saving"}
-                      className="label-eyebrow border border-line px-3 py-2 text-xs text-ink-soft transition-colors hover:border-gold hover:text-gold disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      {saveStatus === "saving" ? "Enviando…" : "Enviar a autoevaluación"}
-                    </button>
-                    {!qualifies && (
-                      <p className="max-w-[16rem] text-[0.65rem] text-ink-soft">
-                        Hay muy pocos partidos jugados para que evaluar esto diga algo del modelo (confianza{" "}
-                        {prediction.confidence.level}). Espera a que ambos equipos sumen más fechas.
-                      </p>
-                    )}
-                    {saveStatus === "error" && saveError && <p className="max-w-[16rem] text-[0.65rem] text-red">{saveError}</p>}
-                  </div>
+                  <span className="flex items-center gap-2 whitespace-nowrap">
+                    <Pill tone={tracked.correctOneXTwo ? "pitch" : "red"}>
+                      {tracked.correctOneXTwo ? "Acertó ✓" : "Falló ✗"} {tracked.actualHomeGoals}-{tracked.actualAwayGoals}
+                    </Pill>
+                    <Link href="/rendimiento" className="label-eyebrow text-[0.65rem] text-ink-soft hover:text-gold print:hidden">
+                      Historial →
+                    </Link>
+                  </span>
                 );
-              })()}
-              <Link href="/rendimiento" className="label-eyebrow text-[0.65rem] text-ink-soft hover:text-gold print:hidden">
-                Ver historial de pronósticos →
-              </Link>
-            </div>
-          </div>
+              }
+
+              if (saveStatus === "saved" || tracked?.evaluatedAt === null) {
+                return (
+                  <span className="flex items-center gap-2 whitespace-nowrap print:hidden">
+                    <Pill tone="gold">En seguimiento</Pill>
+                    <Link href="/rendimiento" className="label-eyebrow text-[0.65rem] text-ink-soft hover:text-gold">
+                      Historial →
+                    </Link>
+                  </span>
+                );
+              }
+
+              const qualifies = qualifiesForTracking(prediction.confidence.level);
+              return (
+                <span className="flex items-center gap-3 print:hidden">
+                  {!qualifies && (
+                    <span className="max-w-[18rem] text-[0.65rem] text-ink-soft">
+                      Muy pocos partidos jugados para que evaluarlo diga algo del modelo.
+                    </span>
+                  )}
+                  {saveStatus === "error" && saveError && <span className="max-w-[18rem] text-[0.65rem] text-red">{saveError}</span>}
+                  <button
+                    onClick={handleSaveForEvaluation}
+                    disabled={!qualifies || saveStatus === "saving"}
+                    title="Guarda este pronóstico tal cual para compararlo con el resultado real. No se puede modificar después."
+                    className="label-eyebrow whitespace-nowrap border border-line px-3 py-2 text-xs text-ink-soft transition-colors hover:border-gold hover:text-gold disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {saveStatus === "saving" ? "Enviando…" : "Seguir este pronóstico"}
+                  </button>
+                  <Link href="/rendimiento" className="label-eyebrow text-[0.65rem] text-ink-soft hover:text-gold">
+                    Historial →
+                  </Link>
+                </span>
+              );
+            })()}
+          />
 
           <div>
             <p className="label-eyebrow mb-3 text-xs text-ink-soft">Predicción principal</p>

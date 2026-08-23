@@ -54,15 +54,21 @@ export async function POST(request: Request) {
       confidenceLevel,
     };
 
+    // A tracked prediction is immutable once stored. This used to overwrite an
+    // existing pending record and reset its createdAt, which meant a forecast could
+    // be silently replaced by a better-informed one after more matches had been
+    // played — the accuracy and calibration figures would then describe predictions
+    // made with hindsight rather than the ones actually made. Re-sending the same
+    // matchup now returns what is already on file.
     const existing = await prisma.prediction.findFirst({
       where: { competitionCode, homeTeamId, awayTeamId, evaluatedAt: null },
     });
+    if (existing) {
+      return NextResponse.json({ id: existing.id, createdAt: existing.createdAt, alreadyTracked: true });
+    }
 
-    const saved = existing
-      ? await prisma.prediction.update({ where: { id: existing.id }, data: { ...data, createdAt: new Date() } })
-      : await prisma.prediction.create({ data });
-
-    return NextResponse.json({ id: saved.id, createdAt: saved.createdAt });
+    const saved = await prisma.prediction.create({ data });
+    return NextResponse.json({ id: saved.id, createdAt: saved.createdAt, alreadyTracked: false });
   } catch (err) {
     if (err instanceof PredictionUnavailableError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
