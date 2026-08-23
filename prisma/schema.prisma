@@ -20,6 +20,8 @@ model Competition {
   teams             Team[]
   matches           Match[]
   fixtures          Fixture[]
+  predictions       Prediction[]
+  bets              Bet[]
 }
 
 model Team {
@@ -90,4 +92,83 @@ model Fixture {
   fetchedAt       DateTime    @default(now())
 
   @@index([competitionCode, utcDate])
+}
+
+// A prediction the user explicitly chose to track (see src/lib/predictions/gate.ts —
+// only favorite probability >= 65% with alta/media confidence qualifies for saving).
+// Evaluated opportunistically whenever refreshFromApi() re-fetches finished matches
+// for this competition (standingsCache.ts) — no dedicated polling, no extra API calls.
+model Prediction {
+  id                  Int         @id @default(autoincrement())
+  competitionCode     String
+  competition         Competition @relation(fields: [competitionCode], references: [code])
+  homeTeamId          Int
+  homeTeamName        String
+  awayTeamId          Int
+  awayTeamName        String
+  createdAt           DateTime    @default(now())
+
+  lambdaHome          Float
+  lambdaAway          Float
+  favorite            String // "home" | "draw" | "away"
+  favoriteProbability Float
+  bttsYesProbability  Float
+  over25Probability   Float
+  predictedHomeGoals  Int
+  predictedAwayGoals  Int
+  confidenceLevel     String // "alta" | "media"
+
+  evaluatedAt         DateTime?
+  actualHomeGoals     Int?
+  actualAwayGoals     Int?
+  correctOneXTwo      Boolean?
+  correctBtts         Boolean?
+  correctOverUnder25  Boolean?
+  correctExactScore   Boolean?
+  goalError           Float?
+
+  @@index([competitionCode])
+  @@index([evaluatedAt])
+}
+
+// A real bet the user placed against their own bookmaker's odds — distinct from
+// Prediction, which tracks whether the *model* is accurate. Settled the same
+// opportunistic way (see standingsCache.ts:refreshFromApi), matched against the
+// Match cache by (homeTeamId, awayTeamId, matchUtcDate) with a tolerance window
+// since it targets one specific scheduled fixture rather than "the next match".
+model Bet {
+  id                  Int         @id @default(autoincrement())
+  competitionCode     String
+  competition         Competition @relation(fields: [competitionCode], references: [code])
+  homeTeamId          Int
+  homeTeamName        String
+  awayTeamId          Int
+  awayTeamName        String
+  matchUtcDate        DateTime
+  createdAt           DateTime    @default(now())
+
+  market              String // "home"|"draw"|"away"|"btts_yes"|"btts_no"|"over_2_5"|"under_2_5"
+  marketLabel         String
+  modelProbability    Float
+  odds                Float // real odds the user entered — not derived from our model
+  stake               Float
+  suggestedStake      Float // what fractional-Kelly suggested, kept for reference only
+
+  status              String    @default("pending") // "pending" | "won" | "lost" | "void" (match postponed/cancelled — profit fixed at 0, excluded from staked/yield/win-rate)
+  settledAt           DateTime?
+  actualHomeGoals     Int?
+  actualAwayGoals     Int?
+  profit              Float?
+
+  @@index([competitionCode])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Singleton row (id always 1) holding the user's self-reported starting balance.
+// currentBalance is never stored — it's startingBalance + sum(profit) of settled Bets.
+model Bankroll {
+  id              Int      @id
+  startingBalance Float
+  updatedAt       DateTime @updatedAt
 }

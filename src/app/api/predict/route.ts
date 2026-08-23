@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { ensureFreshStandings, getWeightedTeamStats } from "@/lib/cache/standingsCache";
-import { predictMatch } from "@/lib/poisson";
+import { computeEnrichedPrediction, PredictionUnavailableError } from "@/lib/predict";
 
 const bodySchema = z.object({
   competitionCode: z.string().min(1),
@@ -21,27 +20,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "homeTeamId and awayTeamId must be different." }, { status: 400 });
   }
 
-  const standings = await ensureFreshStandings(competitionCode);
-
-  if (!standings.hasHomeAway) {
-    return NextResponse.json(
-      { error: `${standings.name} does not expose home/away split standings — predictions aren't supported for this competition.` },
-      { status: 422 }
-    );
-  }
-
-  if (!standings.seasonStarted) {
-    return NextResponse.json(
-      { error: `${standings.name}'s season hasn't started yet — no matches played, so there's no data to predict from.` },
-      { status: 422 }
-    );
-  }
-
   try {
-    const teamStats = await getWeightedTeamStats(competitionCode);
-    const prediction = predictMatch(homeTeamId, awayTeamId, teamStats);
-    return NextResponse.json(prediction);
+    const response = await computeEnrichedPrediction(competitionCode, homeTeamId, awayTeamId);
+    return NextResponse.json(response);
   } catch (err) {
+    if (err instanceof PredictionUnavailableError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     const message = err instanceof Error ? err.message : "Failed to compute prediction.";
     return NextResponse.json({ error: message }, { status: 400 });
   }

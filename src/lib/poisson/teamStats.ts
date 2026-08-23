@@ -32,12 +32,30 @@ export function computeLeagueAverages(teams: TeamGoalStats[]): LeagueAverages {
   };
 }
 
-/** Attack/defense factors for one team, relative to the league averages. */
+// Empirical-Bayes shrinkage: blends a team's raw per-game rate with the league
+// average, weighted by matches played. With 0 games the result is exactly the
+// league average (factor 1.0); by ~20+ games the prior contributes <15% and the
+// team's real rate dominates. Tames small-sample noise (e.g. a newly-promoted
+// team's first 2-3 matches) without needing a separate "not enough data" path —
+// the confidence badge (src/lib/poisson/confidence.ts) still warns separately
+// based on raw match counts, this just keeps the point estimate itself sane.
+export const SHRINKAGE_PSEUDO_MATCHES = 4;
+
+function shrinkRate(teamGoals: number, teamPlayed: number, leagueAvgPerGame: number, pseudoMatches = SHRINKAGE_PSEUDO_MATCHES): number {
+  return (teamGoals + pseudoMatches * leagueAvgPerGame) / (teamPlayed + pseudoMatches);
+}
+
+/**
+ * Attack/defense factors for one team, relative to the league averages —
+ * both sides normalized symmetrically (a team's attack matters relative to how
+ * high-scoring its league is, exactly like its defense already does), and each
+ * underlying rate is shrunk toward the league average per SHRINKAGE_PSEUDO_MATCHES.
+ */
 export function computeTeamFactors(team: TeamGoalStats, leagueAvg: LeagueAverages): TeamFactors {
-  const avgGoalsScoredHome = team.goalsForHome / team.playedHome;
-  const avgGoalsConcededHome = team.goalsAgainstHome / team.playedHome;
-  const avgGoalsScoredAway = team.goalsForAway / team.playedAway;
-  const avgGoalsConcededAway = team.goalsAgainstAway / team.playedAway;
+  const avgGoalsScoredHome = shrinkRate(team.goalsForHome, team.playedHome, leagueAvg.avgGoalsScoredHome);
+  const avgGoalsConcededHome = shrinkRate(team.goalsAgainstHome, team.playedHome, leagueAvg.avgGoalsConcededHome);
+  const avgGoalsScoredAway = shrinkRate(team.goalsForAway, team.playedAway, leagueAvg.avgGoalsScoredAway);
+  const avgGoalsConcededAway = shrinkRate(team.goalsAgainstAway, team.playedAway, leagueAvg.avgGoalsConcededAway);
 
   return {
     teamId: team.teamId,
@@ -46,6 +64,8 @@ export function computeTeamFactors(team: TeamGoalStats, leagueAvg: LeagueAverage
     avgGoalsConcededHome,
     avgGoalsScoredAway,
     avgGoalsConcededAway,
+    attackFactorHome: avgGoalsScoredHome / leagueAvg.avgGoalsScoredHome,
+    attackFactorAway: avgGoalsScoredAway / leagueAvg.avgGoalsScoredAway,
     defenseFactorHome: avgGoalsConcededHome / leagueAvg.avgGoalsConcededHome,
     defenseFactorAway: avgGoalsConcededAway / leagueAvg.avgGoalsConcededAway,
   };

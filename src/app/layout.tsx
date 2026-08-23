@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Oswald, IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import { RateLimitBadge } from "@/components/RateLimitBadge";
 import "./globals.css";
 
 // Condensed, athletic — headings and labels read like stadium signage.
@@ -36,7 +37,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" className={`${display.variable} ${body.variable} ${mono.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <RateLimitBadge />
+      </body>
     </html>
   );
 }

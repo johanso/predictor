@@ -3,6 +3,9 @@ import { getFinishedMatches, FootballDataError } from "@/lib/footballData/client
 import { getCompetitionInfo } from "@/lib/footballData/competitions";
 import type { FdMatch } from "@/lib/footballData/types";
 import { computeWeightedTeamGoalStats, DEFAULT_HALF_LIFE_DAYS } from "@/lib/poisson/weighting";
+import { getFormStringsForCompetition } from "@/lib/cache/formCache";
+import { evaluatePrediction } from "@/lib/predictions/evaluate";
+import { settleBet, type BetMarket } from "@/lib/betting/settle";
 import type { TeamGoalStats } from "@/types/domain";
 
 const TTL_MS = 6 * 60 * 60 * 1000; // refetch at most every 6h
@@ -20,6 +23,7 @@ export interface StandingsRow {
   goalsAgainst: number;
   goalDifference: number;
   points: number;
+  form: string; // e.g. "VVEDD", most recent first, up to last 5; "" if no matches cached yet
 }
 
 export interface LeagueStandingsResult {
@@ -76,6 +80,7 @@ async function readFromDb(code: string): Promise<LeagueStandingsResult> {
     }));
 
   const seasonStarted = teams.some((t) => t.playedHome > 0 || t.playedAway > 0);
+  const formByTeam = await getFormStringsForCompetition(code);
 
   const table: StandingsRow[] = result.teams
     .filter((t) => t.standing)
@@ -95,6 +100,7 @@ async function readFromDb(code: string): Promise<LeagueStandingsResult> {
         goalsAgainst,
         goalDifference: goalsFor - goalsAgainst,
         points: s.pointsTotal,
+        form: formByTeam.get(t.id) ?? "",
       };
     })
     .sort(
@@ -257,7 +263,64 @@ async function refreshFromApi(code: string, name: string, hasHomeAway: boolean):
   const byTeam = aggregateFromMatches(data.matches);
   const completedMatches = data.matches.filter((m) => m.score.fullTime.home !== null && m.score.fullTime.away !== null);
 
+  // Opportunistic evaluation: piggybacks on this same fetch, no extra API calls. A
+  // tracked prediction gets evaluated the next time this competition's cache refreshes
+  // after its match has been played — see src/lib/predictions/evaluate.ts.
+  const pendingPredictions = await prisma.prediction.findMany({ where: { competitionCode: code, evaluatedAt: null } });
+  const evaluationOps = pendingPredictions.flatMap((pred) => {
+    const match = completedMatches.find(
+      (m) => m.homeTeam.id === pred.homeTeamId && m.awayTeam.id === pred.awayTeamId && new Date(m.utcDate) > pred.createdAt
+    );
+    if (!match) return [];
+    const actualHomeGoals = match.score.fullTime.home!;
+    const actualAwayGoals = match.score.fullTime.away!;
+    const evalFields = evaluatePrediction(
+      {
+        favorite: pred.favorite as "home" | "draw" | "away",
+        bttsYesProbability: pred.bttsYesProbability,
+        over25Probability: pred.over25Probability,
+        predictedHomeGoals: pred.predictedHomeGoals,
+        predictedAwayGoals: pred.predictedAwayGoals,
+        lambdaHome: pred.lambdaHome,
+        lambdaAway: pred.lambdaAway,
+      },
+      actualHomeGoals,
+      actualAwayGoals
+    );
+    return [
+      prisma.prediction.update({
+        where: { id: pred.id },
+        data: { evaluatedAt: new Date(), actualHomeGoals, actualAwayGoals, ...evalFields },
+      }),
+    ];
+  });
+
+  // Same opportunistic pattern for real user bets — see src/lib/betting/settle.ts.
+  // Matched by (teams, matchUtcDate) with a tolerance window rather than "any match
+  // after createdAt", since a Bet already points at one specific scheduled fixture.
+  const pendingBets = await prisma.bet.findMany({ where: { competitionCode: code, status: "pending" } });
+  const betSettleOps = pendingBets.flatMap((bet) => {
+    const match = completedMatches.find(
+      (m) =>
+        m.homeTeam.id === bet.homeTeamId &&
+        m.awayTeam.id === bet.awayTeamId &&
+        Math.abs(new Date(m.utcDate).getTime() - bet.matchUtcDate.getTime()) < 3 * 24 * 60 * 60 * 1000
+    );
+    if (!match) return [];
+    const actualHomeGoals = match.score.fullTime.home!;
+    const actualAwayGoals = match.score.fullTime.away!;
+    const { won, profit } = settleBet(bet.market as BetMarket, bet.odds, bet.stake, actualHomeGoals, actualAwayGoals);
+    return [
+      prisma.bet.update({
+        where: { id: bet.id },
+        data: { status: won ? "won" : "lost", settledAt: new Date(), actualHomeGoals, actualAwayGoals, profit },
+      }),
+    ];
+  });
+
   await prisma.$transaction([
+    ...evaluationOps,
+    ...betSettleOps,
     prisma.competition.upsert({
       where: { code },
       create: { code, name, season, hasHomeAway: true, fetchedAt: new Date() },

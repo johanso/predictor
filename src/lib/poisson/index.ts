@@ -1,4 +1,4 @@
-import type { MatchPrediction, MarketOutcome, TeamGoalStats } from "@/types/domain";
+import type { DerivedMarkets, MatchPrediction, MarketOutcome, TeamGoalStats } from "@/types/domain";
 import { computeLeagueAverages, computeTeamFactors } from "./teamStats";
 import { computeLambdas } from "./matchup";
 import {
@@ -7,6 +7,10 @@ import {
   bttsProbabilities,
   exactScoreProbabilities,
   overUnderProbabilities,
+  overZeroFiveProbabilities,
+  cleanSheetProbabilities,
+  winToNilProbabilities,
+  goalRangeProbabilities,
 } from "./markets";
 import { toOdds } from "./math";
 import { applyDixonColesAdjustment } from "./dixonColes";
@@ -15,11 +19,11 @@ function outcome(label: string, probability: number): MarketOutcome {
   return { label, probability, odds: toOdds(probability) };
 }
 
-export function predictMatch(
+export function predictMatchWithMatrix(
   homeTeamId: number,
   awayTeamId: number,
   allTeamStats: TeamGoalStats[]
-): MatchPrediction {
+): { prediction: MatchPrediction; matrix: number[][] } {
   const home = allTeamStats.find((t) => t.teamId === homeTeamId);
   const away = allTeamStats.find((t) => t.teamId === awayTeamId);
   if (!home) throw new Error(`Unknown home team id ${homeTeamId}`);
@@ -30,7 +34,7 @@ export function predictMatch(
   const leagueAvg = computeLeagueAverages(allTeamStats);
   const homeFactors = computeTeamFactors(home, leagueAvg);
   const awayFactors = computeTeamFactors(away, leagueAvg);
-  const { lambdaHome, lambdaAway } = computeLambdas(homeFactors, awayFactors);
+  const { lambdaHome, lambdaAway } = computeLambdas(homeFactors, awayFactors, leagueAvg);
 
   const rawMatrix = buildProbabilityMatrix(lambdaHome, lambdaAway);
   // Dixon-Coles: corrects the independent-Poisson model's known mispricing of
@@ -49,7 +53,7 @@ export function predictMatch(
     under: outcome(`-${ou.line}`, ou.under),
   }));
 
-  return {
+  const prediction: MatchPrediction = {
     homeTeam: home.teamName,
     awayTeam: away.teamName,
     lambdaHome,
@@ -71,6 +75,33 @@ export function predictMatch(
     exactScores,
     overUnder,
   };
+
+  return { prediction, matrix };
+}
+
+export function predictMatch(
+  homeTeamId: number,
+  awayTeamId: number,
+  allTeamStats: TeamGoalStats[]
+): MatchPrediction {
+  return predictMatchWithMatrix(homeTeamId, awayTeamId, allTeamStats).prediction;
+}
+
+export function buildDerivedMarkets(matrix: number[][]): DerivedMarkets {
+  const over05 = overZeroFiveProbabilities(matrix);
+  const cleanSheet = cleanSheetProbabilities(matrix);
+  const winToNil = winToNilProbabilities(matrix);
+  const goalRanges = goalRangeProbabilities(matrix);
+
+  return {
+    homeOver05: outcome("Local marca +0.5", over05.home),
+    awayOver05: outcome("Visitante marca +0.5", over05.away),
+    cleanSheetHome: outcome("Portería a cero (Local)", cleanSheet.home),
+    cleanSheetAway: outcome("Portería a cero (Visitante)", cleanSheet.away),
+    winToNilHome: outcome("Gana sin recibir (Local)", winToNil.home),
+    winToNilAway: outcome("Gana sin recibir (Visitante)", winToNil.away),
+    goalRanges: goalRanges.map((r) => ({ label: r.label, outcome: outcome(r.label, r.probability) })),
+  };
 }
 
 export * from "./math";
@@ -79,3 +110,5 @@ export * from "./matchup";
 export * from "./markets";
 export * from "./dixonColes";
 export * from "./weighting";
+export * from "./summary";
+export * from "./confidence";

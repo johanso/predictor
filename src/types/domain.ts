@@ -23,6 +23,8 @@ export interface TeamFactors {
   avgGoalsConcededHome: number;
   avgGoalsScoredAway: number;
   avgGoalsConcededAway: number;
+  attackFactorHome: number;
+  attackFactorAway: number;
   defenseFactorHome: number;
   defenseFactorAway: number;
 }
@@ -67,4 +69,69 @@ export interface MatchPrediction {
   };
   exactScores: ExactScoreOutcome[];
   overUnder: OverUnderOutcome[];
+}
+
+export interface PredictionSummary {
+  favorite: "home" | "away" | "draw";
+  favoriteLabel: string;
+  favoriteProbability: number;
+  likelyScore: { home: number; away: number; probability: number };
+  text: string;
+}
+
+export interface DerivedMarkets {
+  homeOver05: MarketOutcome;
+  awayOver05: MarketOutcome;
+  cleanSheetHome: MarketOutcome;
+  cleanSheetAway: MarketOutcome;
+  winToNilHome: MarketOutcome;
+  winToNilAway: MarketOutcome;
+  goalRanges: { label: "0-1" | "2-3" | "4+"; outcome: MarketOutcome }[];
+}
+
+export type ConfidenceLevel = "alta" | "media" | "baja";
+
+export interface ConfidenceInfo {
+  level: ConfidenceLevel;
+  homeSampleSize: number;
+  awaySampleSize: number;
+  dataAgeHours: number | null;
+  warnings: string[];
+}
+
+export interface RecentFormEntry {
+  opponent: string;
+  result: "V" | "E" | "D"; // Victoria / Empate / Derrota
+  goalsFor: number;
+  goalsAgainst: number;
+  utcDate: string;
+}
+
+export interface TeamRecentForm {
+  teamId: number;
+  teamName: string;
+  overall: RecentFormEntry[];
+  venue: RecentFormEntry[];
+  venueLabel: "home" | "away";
+}
+
+export interface TeamComparativeStats {
+  teamId: number;
+  teamName: string;
+  matchesAnalyzed: number;
+  avgGoalsScored: number;
+  avgGoalsConceded: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  bttsPct: number;
+  over25Pct: number;
+}
+
+export interface EnrichedMatchPrediction extends MatchPrediction {
+  summary: PredictionSummary;
+  derivedMarkets: DerivedMarkets;
+  confidence: ConfidenceInfo;
+  recentForm: { home: TeamRecentForm; away: TeamRecentForm };
+  comparative: { home: TeamComparativeStats; away: TeamComparativeStats };
 }

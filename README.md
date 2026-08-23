@@ -11,19 +11,33 @@ gratuito y una interfaz interactiva.
 
 Para cada equipo se calcula, a partir de sus partidos como local y visitante:
 
-- Goles promedio marcados/recibidos, local y visitante.
-- Factor de defensa = goles recibidos promedio del equipo ÷ promedio de la liga.
+- Goles promedio marcados/recibidos, local y visitante — **regularizados** hacia el promedio de
+  liga (`SHRINKAGE_PSEUDO_MATCHES` en `src/lib/poisson/teamStats.ts`): con 0 partidos jugados el
+  promedio del equipo es exactamente el de la liga; con muchos partidos, el promedio real del
+  equipo domina. Evita que 2-3 partidos (ej. un equipo recién ascendido) produzcan un λ extremo.
+- Factor de ataque = goles marcados promedio (ya regularizado) del equipo ÷ promedio de la liga.
+- Factor de defensa = goles recibidos promedio (ya regularizado) del equipo ÷ promedio de la liga.
 
-Para un partido concreto:
+Para un partido concreto (`src/lib/poisson/matchup.ts`), ataque y defensa se normalizan
+simétricamente contra el promedio de liga:
 
 ```
-λ_local     = (goles marcados en casa por el local)      × (factor defensivo visitante del rival)
-λ_visitante = (goles marcados fuera por el visitante)     × (factor defensivo local del anfitrión)
+λ_local     = (prom. de liga, goles de local) × (factor de ataque del local)      × (factor defensivo visitante del rival)
+λ_visitante = (prom. de liga, goles de visitante) × (factor de ataque del visitante) × (factor defensivo local del anfitrión)
 ```
 
 Con esos dos valores se arma una matriz de probabilidad de Poisson bivariante (0 a 10 goles por
-lado) de la que salen todos los mercados. La lógica pura está en `src/lib/poisson/` y tiene tests
-(`tests/poisson/`) que verifican los resultados contra los valores exactos del Excel original.
+lado), corregida con el ajuste de Dixon-Coles para marcadores bajos (`src/lib/poisson/dixonColes.ts`),
+de la que salen todos los mercados. La lógica pura está en `src/lib/poisson/` y tiene tests
+(`tests/poisson/`).
+
+Nota histórica: el proyecto arrancó como una réplica de una calculadora de Excel
+(`LIGA‑SERIA‑A‑BRASIL.xlsx`), cuya fórmula solo normalizaba la defensa contra el promedio de liga
+y dejaba el ataque sin normalizar (así que un equipo en una liga muy goleadora inflaba su ataque
+sin que el modelo lo corrigiera) y no tenía regularización para muestras chicas. Los tests de
+`computeLeagueAverages`/`gridTotal`/mercados que reproducen números exactos del Excel siguen
+documentados como tal; los de `computeTeamFactors`/`computeLambdas` ya no reproducen esos números
+a propósito — la metodología cambió deliberadamente para corregir esos dos límites.
 
 ## Requisitos
 

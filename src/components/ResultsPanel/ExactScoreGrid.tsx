@@ -1,10 +1,7 @@
 import type { ExactScoreOutcome } from "@/types/domain";
 import { Card } from "@/components/ui/Card";
-
-// Matches --pitch in globals.css. Computed directly in JS (rather than the CSS
-// color-mix() function) so the heatmap tint renders the same everywhere,
-// independent of color-mix browser support or custom-property timing.
-const PITCH_RGB = "31, 109, 69";
+import { formatPercent } from "@/lib/format";
+import { PITCH_RGB, intensity as computeIntensity, tint } from "@/lib/colorScale";
 
 export function ExactScoreGrid({
   scores,
@@ -49,15 +46,15 @@ export function ExactScoreGrid({
               <th className="pr-2 font-normal text-pitch">{h}</th>
               {goals.map((a) => {
                 const cell = byKey.get(`${h}-${a}`);
-                const intensity = cell ? Math.sqrt(cell.probability / maxProbability) : 0;
-                const strong = intensity > 0.55;
+                const cellIntensity = cell ? computeIntensity(cell.probability, maxProbability) : 0;
+                const strong = cellIntensity > 0.55;
                 return (
                   <td
                     key={a}
                     className={`border border-line px-1 py-2 text-center ${strong ? "text-paper" : "text-ink"}`}
-                    style={{ backgroundColor: cell ? `rgba(${PITCH_RGB}, ${intensity.toFixed(3)})` : undefined }}
+                    style={{ backgroundColor: cell ? tint(PITCH_RGB, cellIntensity) : undefined }}
                   >
-                    {cell ? `${(cell.probability * 100).toFixed(1)}%` : "—"}
+                    {cell ? formatPercent(cell.probability) : "—"}
                   </td>
                 );
               })}

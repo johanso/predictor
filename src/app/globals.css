@@ -21,6 +21,15 @@
   --red: #a5233a;
   --red-dim: #f8e6e9;
   --line: #d8ded3;
+  --result-win: #00a83f;
+  --result-draw: #f3a000;
+  --result-loss: #dc0000;
+  /* Fixed "stadium sign" chrome for page headers — deliberately does NOT
+     flip in the dark-mode block below. It's a stamped-ink dark banner in
+     both themes, not a semantic ink/paper pairing (which would otherwise
+     invert to a bright stripe on a dark page). */
+  --chrome: #14201a;
+  --chrome-ink: #f1f4ef;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -55,6 +64,11 @@
   --color-red: var(--red);
   --color-red-dim: var(--red-dim);
   --color-line: var(--line);
+  --color-result-win: var(--result-win);
+  --color-result-draw: var(--result-draw);
+  --color-result-loss: var(--result-loss);
+  --color-chrome: var(--chrome);
+  --color-chrome-ink: var(--chrome-ink);
   --font-display: var(--font-display);
   --font-body: var(--font-body);
   --font-mono: var(--font-mono);
