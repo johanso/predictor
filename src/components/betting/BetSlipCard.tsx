@@ -188,6 +188,28 @@ export function BetSlipCard({
     return o > 1 ? marketProbabilities[m] * o - 1 : null;
   };
 
+  /**
+   * The edge in percentage points: how far the model's probability sits above the
+   * one the price implies. This, not the EV percentage, is what ranks the rows.
+   *
+   * EV% divides by the stake, so the same disagreement looks far bigger at long
+   * odds — 4 points of edge reads as +17% at 3.90 but +9% at 2.20. Ranking by EV%
+   * therefore steers you toward longshots, where a small error in the model's
+   * probability moves the result most. Percentage points compare like with like.
+   */
+  const pointsOf = (m: BetMarket) => {
+    const o = oddsOf(m);
+    return o > 1 ? marketProbabilities[m] - 1 / o : null;
+  };
+
+  // The two strongest positive edges, best first. Highlighted in the table so the
+  // candidates stand out without having to read every row.
+  const topPicks = BET_MARKETS.map((m) => ({ market: m.value, points: pointsOf(m.value) }))
+    .filter((r): r is { market: BetMarket; points: number } => r.points !== null && r.points > 0)
+    .sort((a, b) => b.points - a.points)
+    .slice(0, 2);
+  const rankOf = new Map<BetMarket, number>(topPicks.map((p, i) => [p.market, i + 1]));
+
   const valueCount = BET_MARKETS.filter((m) => (edgeOf(m.value) ?? 0) > 0).length;
   const filledCount = BET_MARKETS.filter((m) => oddsOf(m.value) > 1).length;
 
@@ -347,9 +369,28 @@ export function BetSlipCard({
                   const edge = edgeOf(m);
                   const isValue = edge !== null && edge > 0;
                   const done = registered.includes(m);
+                  const rank = rankOf.get(m);
+                  const points = pointsOf(m);
                   return (
-                    <tr key={m} className={`border-b border-line last:border-0 ${selected === m ? "bg-paper-raised" : ""}`}>
-                      <td className="px-2 py-1.5 whitespace-nowrap">{LABELS[m]}</td>
+                    <tr
+                      key={m}
+                      className={`border-b border-line last:border-0 ${
+                        selected === m ? "bg-paper-raised" : rank === 1 ? "bg-pitch-dim" : rank === 2 ? "bg-pitch-dim/50" : ""
+                      }`}
+                      title={rank ? `${rank === 1 ? "Mejor" : "Segunda mejor"} relación: el modelo la da ${(points! * 100).toFixed(1)} puntos por encima del ${((1 / oddsOf(m)) * 100).toFixed(1)}% que implica la cuota.` : undefined}
+                    >
+                      <td
+                        className={`px-2 py-1.5 whitespace-nowrap ${
+                          rank === 1 ? "border-l-4 border-pitch font-medium" : rank === 2 ? "border-l-4 border-pitch/40" : "border-l-4 border-transparent"
+                        }`}
+                      >
+                        {LABELS[m]}
+                        {rank && (
+                          <span className={`font-numeric ml-2 text-[0.6rem] ${rank === 1 ? "text-pitch" : "text-ink-soft"}`}>
+                            +{(points! * 100).toFixed(1)} pp
+                          </span>
+                        )}
+                      </td>
                       <td className="font-numeric px-2 py-1.5 text-right text-ink-soft">{formatPercent(p)}</td>
                       <td className="font-numeric px-2 py-1.5 text-right text-ink-soft">{p > 0 ? (1 / p).toFixed(2) : "—"}</td>
                       <td className="px-2 py-1.5 text-right">
@@ -398,9 +439,15 @@ export function BetSlipCard({
           {valueCount === 0 ? (
             "ninguna por encima de la cuota justa del modelo."
           ) : (
-            <span className="text-result-win">
-              {valueCount} por encima de la cuota justa del modelo.
-            </span>
+            <span className="text-result-win">{valueCount} por encima de la cuota justa del modelo.</span>
+          )}
+          {topPicks.length > 0 && (
+            <>
+              {" "}
+              Resaltadas las {topPicks.length === 1 ? "mejor" : "dos mejores"} por{" "}
+              <strong className="text-ink">puntos de probabilidad</strong> (lo que el modelo da por encima de lo que implica
+              la cuota), no por porcentaje de valor — ese último premia las cuotas largas, que son las más frágiles.
+            </>
           )}
         </p>
       )}
