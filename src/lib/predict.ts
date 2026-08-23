@@ -1,7 +1,9 @@
 import { ensureFreshStandings, getWeightedTeamStats } from "@/lib/cache/standingsCache";
 import { getRawSampleSizes, getTeamComparativeStats, getTeamRecentForm } from "@/lib/cache/formCache";
-import { buildDerivedMarkets, buildSummary, computeConfidence, predictMatchWithMatrix } from "@/lib/poisson";
-import type { EnrichedMatchPrediction } from "@/types/domain";
+import { getCompetitionRatings } from "@/lib/cache/ratingsCache";
+import { buildDerivedMarkets, buildPredictionFromLambdas, buildSummary, computeConfidence, predictMatchWithMatrix } from "@/lib/poisson";
+import { fittedLambdas } from "@/lib/poisson/dixonColesFit";
+import type { EnrichedMatchPrediction, MatchPrediction } from "@/types/domain";
 
 /** Thrown for expected "can't predict this" cases (unsupported competition, season not started) — carries the HTTP status the caller should respond with. */
 export class PredictionUnavailableError extends Error {
@@ -36,8 +38,30 @@ export async function computeEnrichedPrediction(
     );
   }
 
-  const teamStats = await getWeightedTeamStats(competitionCode);
-  const { prediction, matrix } = predictMatchWithMatrix(homeTeamId, awayTeamId, teamStats);
+  // Preferred path: attack/defense strengths fitted by maximum likelihood over every
+  // cached result, which prices each team relative to the opposition it actually faced.
+  // Measured against the ratio-of-averages fallback below on three Brasileirão seasons
+  // it roughly doubles the model's edge over league base rates and cuts the draw bias
+  // from +3.5pp to +1.2pp (scripts/compare.test.ts). The fallback still runs whenever
+  // the raw Match cache hasn't been backfilled for this competition yet.
+  const ratings = await getCompetitionRatings(competitionCode);
+
+  let prediction: MatchPrediction;
+  let matrix: number[][];
+
+  if (ratings && ratings.fit.attack.has(homeTeamId) && ratings.fit.attack.has(awayTeamId)) {
+    const { lambdaHome, lambdaAway } = fittedLambdas(ratings.fit, homeTeamId, awayTeamId);
+    ({ prediction, matrix } = buildPredictionFromLambdas(
+      ratings.teamNames.get(homeTeamId) ?? String(homeTeamId),
+      ratings.teamNames.get(awayTeamId) ?? String(awayTeamId),
+      lambdaHome,
+      lambdaAway,
+      ratings.fit.rho
+    ));
+  } else {
+    const teamStats = await getWeightedTeamStats(competitionCode);
+    ({ prediction, matrix } = predictMatchWithMatrix(homeTeamId, awayTeamId, teamStats));
+  }
 
   const [homeForm, awayForm, homeComparative, awayComparative, sampleSizes] = await Promise.all([
     getTeamRecentForm(homeTeamId, prediction.homeTeam, competitionCode, "home"),

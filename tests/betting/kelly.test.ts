@@ -37,4 +37,64 @@ describe("computeKellyStake", () => {
     expect(computeKellyStake(1, 2.5, 1000).hasEdge).toBe(false);
     expect(computeKellyStake(0.5, 2.5, 0).hasEdge).toBe(false);
   });
+
+  /**
+   * Kelly is not an arbitrary formula — it is *defined* as the stake fraction that
+   * maximises the expected logarithm of wealth. This checks the implementation
+   * against that definition by brute force rather than against itself, so a wrong
+   * rearrangement of (bp - q)/b could not pass.
+   */
+  it("matches the fraction that maximises expected log growth", () => {
+    for (const [p, odds] of [
+      [0.55, 2.2],
+      [0.4, 3.2],
+      [0.7, 1.8],
+      [0.25, 5.0],
+    ]) {
+      const b = odds - 1;
+      let bestF = 0;
+      let bestGrowth = -Infinity;
+      for (let f = 0; f < 1; f += 0.00005) {
+        const growth = p * Math.log(1 + f * b) + (1 - p) * Math.log(1 - f);
+        if (growth > bestGrowth) {
+          bestGrowth = growth;
+          bestF = f;
+        }
+      }
+      // computeKellyStake reports the fractional stake, so undo KELLY_FRACTION.
+      const raw = computeKellyStake(p, odds, 1000).fraction / KELLY_FRACTION;
+      expect(raw).toBeCloseTo(bestF, 3);
+    }
+  });
+
+  it("agrees with the equivalent (p*odds - 1)/(odds - 1) form", () => {
+    for (const [p, odds] of [
+      [0.5, 2.5],
+      [0.33, 3.6],
+      [0.62, 1.9],
+    ]) {
+      const alternative = (p * odds - 1) / (odds - 1);
+      expect(computeKellyStake(p, odds, 1000).fraction).toBeCloseTo(alternative * KELLY_FRACTION, 10);
+    }
+  });
+
+  it("flags an edge exactly when the bet has positive expected value", () => {
+    // p*odds > 1 is the break-even line; hasEdge must agree with it on both sides.
+    expect(computeKellyStake(0.51, 2.0, 1000).hasEdge).toBe(true); // EV +2%
+    expect(computeKellyStake(0.49, 2.0, 1000).hasEdge).toBe(false); // EV -2%
+    expect(computeKellyStake(0.455, 2.2, 1000).hasEdge).toBe(true); // just above 1/2.2
+    expect(computeKellyStake(0.45, 2.2, 1000).hasEdge).toBe(false); // just below
+  });
+
+  it("never suggests staking more than the bankroll or a negative amount", () => {
+    for (const p of [0.01, 0.3, 0.5, 0.8, 0.99]) {
+      for (const odds of [1.01, 1.5, 2, 5, 50]) {
+        const { fraction, suggestedStake } = computeKellyStake(p, odds, 500);
+        expect(fraction).toBeGreaterThanOrEqual(0);
+        expect(fraction).toBeLessThanOrEqual(MAX_STAKE_FRACTION);
+        expect(suggestedStake).toBeGreaterThanOrEqual(0);
+        expect(suggestedStake).toBeLessThanOrEqual(500);
+      }
+    }
+  });
 });

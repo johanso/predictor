@@ -18,17 +18,20 @@ import { applyDixonColesAdjustment } from "@/lib/poisson/dixonColes";
 import type { LeagueAverages, TeamFactors, TeamGoalStats } from "@/types/domain";
 
 /**
- * Where the season dumps live. They are not committed (a few MB of raw API JSON);
- * fetch them first, one file per season — the free tier does serve past seasons:
+ * Where the season dumps live, one directory per competition code. They are not
+ * committed (a few MB of raw API JSON each); fetch them first — the free tier does
+ * serve past seasons, but only ~10 requests a minute:
  *
- *   mkdir -p data/bsa
- *   for S in 2023 2024 2025; do
- *     curl -s -H "X-Auth-Token: $FOOTBALL_DATA_API_KEY" \
- *       "https://api.football-data.org/v4/competitions/BSA/matches?status=FINISHED&season=$S" \
- *       -o "data/bsa/$S.json"
+ *   for L in BSA PD PL SA BL1; do
+ *     mkdir -p "data/$L"
+ *     for S in 2023 2024 2025; do
+ *       curl -s -H "X-Auth-Token: $FOOTBALL_DATA_API_KEY" \
+ *         "https://api.football-data.org/v4/competitions/$L/matches?status=FINISHED&season=$S" \
+ *         -o "data/$L/$S.json"
+ *     done
  *   done
  */
-export const DATA_DIR = process.env.BSA_DATA_DIR ?? "data/bsa";
+export const DATA_DIR = process.env.FOOTBALL_DATA_DIR ?? "data";
 
 export interface Match {
   date: Date;
@@ -38,13 +41,30 @@ export interface Match {
   awayGoals: number;
 }
 
-const seasonCache = new Map<number, Match[]>();
+const seasonCache = new Map<string, Match[]>();
 
-export function loadSeason(year: number): Match[] {
-  const cached = seasonCache.get(year);
+/** Competition codes with at least one downloaded season, in directory order. */
+export function availableLeagues(): string[] {
+  return fs
+    .readdirSync(DATA_DIR, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && fs.readdirSync(path.join(DATA_DIR, d.name)).some((f) => f.endsWith(".json")))
+    .map((d) => d.name);
+}
+
+export function availableSeasons(league: string): number[] {
+  return fs
+    .readdirSync(path.join(DATA_DIR, league))
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => Number(f.replace(".json", "")))
+    .sort((a, b) => a - b);
+}
+
+export function loadSeason(year: number, league = "BSA"): Match[] {
+  const key = `${league}-${year}`;
+  const cached = seasonCache.get(key);
   if (cached) return cached;
 
-  const raw = JSON.parse(fs.readFileSync(path.join(DATA_DIR, `${year}.json`), "utf8"));
+  const raw = JSON.parse(fs.readFileSync(path.join(DATA_DIR, league, `${year}.json`), "utf8"));
   const matches: Match[] = raw.matches
     .filter((m: any) => m.score?.fullTime?.home !== null && m.score?.fullTime?.away !== null)
     .map((m: any) => ({
@@ -56,7 +76,7 @@ export function loadSeason(year: number): Match[] {
     }))
     .sort((a: Match, b: Match) => a.date.getTime() - b.date.getTime());
 
-  seasonCache.set(year, matches);
+  seasonCache.set(key, matches);
   return matches;
 }
 
@@ -151,11 +171,11 @@ function runningBaseRates(prior: Match[]): { home: number; draw: number; away: n
   return { home: h / prior.length, draw: d / prior.length, away: (prior.length - h - d) / prior.length };
 }
 
-export function backtest(params: Params, seasons: number[]): Row[] {
+export function backtest(params: Params, seasons: number[], league = "BSA"): Row[] {
   const rows: Row[] = [];
 
   for (const season of seasons) {
-    const matches = loadSeason(season);
+    const matches = loadSeason(season, league);
 
     for (let i = 0; i < matches.length; i++) {
       const m = matches[i];

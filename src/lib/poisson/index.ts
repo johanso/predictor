@@ -19,27 +19,23 @@ function outcome(label: string, probability: number): MarketOutcome {
   return { label, probability, odds: toOdds(probability) };
 }
 
-export function predictMatchWithMatrix(
-  homeTeamId: number,
-  awayTeamId: number,
-  allTeamStats: TeamGoalStats[]
+/**
+ * Turns a pair of expected-goal rates into the full market set. Shared by both
+ * estimation paths — the ratio-of-averages one below and the maximum-likelihood
+ * fit in dixonColesFit.ts — so the two can only ever differ in how they arrive at
+ * lambda, never in how the markets are derived from it.
+ */
+export function buildPredictionFromLambdas(
+  homeTeamName: string,
+  awayTeamName: string,
+  lambdaHome: number,
+  lambdaAway: number,
+  rho?: number
 ): { prediction: MatchPrediction; matrix: number[][] } {
-  const home = allTeamStats.find((t) => t.teamId === homeTeamId);
-  const away = allTeamStats.find((t) => t.teamId === awayTeamId);
-  if (!home) throw new Error(`Unknown home team id ${homeTeamId}`);
-  if (!away) throw new Error(`Unknown away team id ${awayTeamId}`);
-  if (home.playedHome === 0) throw new Error(`${home.teamName} has no home games played yet.`);
-  if (away.playedAway === 0) throw new Error(`${away.teamName} has no away games played yet.`);
-
-  const leagueAvg = computeLeagueAverages(allTeamStats);
-  const homeFactors = computeTeamFactors(home, leagueAvg);
-  const awayFactors = computeTeamFactors(away, leagueAvg);
-  const { lambdaHome, lambdaAway } = computeLambdas(homeFactors, awayFactors, leagueAvg);
-
   const rawMatrix = buildProbabilityMatrix(lambdaHome, lambdaAway);
   // Dixon-Coles: corrects the independent-Poisson model's known mispricing of
   // low scorelines (0-0/1-0/0-1/1-1) — see src/lib/poisson/dixonColes.ts.
-  const matrix = applyDixonColesAdjustment(rawMatrix, lambdaHome, lambdaAway);
+  const matrix = applyDixonColesAdjustment(rawMatrix, lambdaHome, lambdaAway, rho);
 
   const { homeWin, draw, awayWin } = oneXTwoProbabilities(matrix);
   const btts = bttsProbabilities(matrix);
@@ -54,8 +50,8 @@ export function predictMatchWithMatrix(
   }));
 
   const prediction: MatchPrediction = {
-    homeTeam: home.teamName,
-    awayTeam: away.teamName,
+    homeTeam: homeTeamName,
+    awayTeam: awayTeamName,
     lambdaHome,
     lambdaAway,
     oneXTwo: {
@@ -77,6 +73,26 @@ export function predictMatchWithMatrix(
   };
 
   return { prediction, matrix };
+}
+
+export function predictMatchWithMatrix(
+  homeTeamId: number,
+  awayTeamId: number,
+  allTeamStats: TeamGoalStats[]
+): { prediction: MatchPrediction; matrix: number[][] } {
+  const home = allTeamStats.find((t) => t.teamId === homeTeamId);
+  const away = allTeamStats.find((t) => t.teamId === awayTeamId);
+  if (!home) throw new Error(`Unknown home team id ${homeTeamId}`);
+  if (!away) throw new Error(`Unknown away team id ${awayTeamId}`);
+  if (home.playedHome === 0) throw new Error(`${home.teamName} has no home games played yet.`);
+  if (away.playedAway === 0) throw new Error(`${away.teamName} has no away games played yet.`);
+
+  const leagueAvg = computeLeagueAverages(allTeamStats);
+  const homeFactors = computeTeamFactors(home, leagueAvg);
+  const awayFactors = computeTeamFactors(away, leagueAvg);
+  const { lambdaHome, lambdaAway } = computeLambdas(homeFactors, awayFactors, leagueAvg);
+
+  return buildPredictionFromLambdas(home.teamName, away.teamName, lambdaHome, lambdaAway);
 }
 
 export function predictMatch(
