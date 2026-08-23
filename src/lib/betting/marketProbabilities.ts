@@ -54,6 +54,9 @@ export interface MarketEdge {
  */
 export const DEFAULT_MIN_PROBABILITY = 0.4;
 
+/** Offered wherever the floor is adjustable, so every table agrees on the choices. */
+export const MIN_PROBABILITY_OPTIONS = [0, 0.3, 0.4, 0.5, 0.6];
+
 /**
  * The strongest positive edge among the priced markets, ignoring outcomes the model
  * rates below `minProbability`. Null when nothing qualifies.

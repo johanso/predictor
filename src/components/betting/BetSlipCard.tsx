@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Pill";
 import { formatPercent } from "@/lib/format";
 import { computeKellyStake } from "@/lib/betting/kelly";
-import { marketProbabilities } from "@/lib/betting/marketProbabilities";
+import { marketProbabilities, DEFAULT_MIN_PROBABILITY, MIN_PROBABILITY_OPTIONS } from "@/lib/betting/marketProbabilities";
 import { BET_MARKETS, type BetMarket } from "@/lib/betting/settle";
 import { marketReliability, reliabilityVerdict, RELIABILITY_VERDICT_LABEL } from "@/lib/betting/reliability";
 import type { FixtureOption } from "@/components/FixturesList";
@@ -88,6 +88,7 @@ export function BetSlipCard({
     fetchedAt: null,
     error: null,
   });
+  const [minProbability, setMinProbability] = useState(DEFAULT_MIN_PROBABILITY);
   const [selected, setSelected] = useState<BetMarket | null>(null);
   const [stakeInput, setStakeInput] = useState("");
   const [stakeTouched, setStakeTouched] = useState(false);
@@ -187,12 +188,25 @@ export function BetSlipCard({
     return o > 1 ? marketProbs[m] - 1 / o : null;
   };
 
-  // The two strongest positive edges, best first. Highlighted in the table so the
-  // candidates stand out without having to read every row.
-  const topPicks = BET_MARKETS.map((m) => ({ market: m.value, points: pointsOf(m.value) }))
-    .filter((r): r is { market: BetMarket; points: number } => r.points !== null && r.points > 0)
+  /**
+   * The two strongest positive edges among outcomes the model rates at or above the
+   * floor, best first.
+   *
+   * The floor is what stops a longshot owning the top row: an outcome given 31% at
+   * 4.10 carries the biggest edge on this table while the model expects it to lose
+   * two times in three, and highlighting it as the pick reads as a contradiction.
+   * Which longshots are acceptable is a risk preference, so it is a control here
+   * exactly as it is on the fixture list, and both default to the same value.
+   */
+  const topPicks = BET_MARKETS.map((m) => ({ market: m.value, points: pointsOf(m.value), p: marketProbs[m.value] }))
+    .filter((r): r is { market: BetMarket; points: number; p: number } => r.points !== null && r.points > 0 && r.p >= minProbability)
     .sort((a, b) => b.points - a.points)
     .slice(0, 2);
+
+  // Positive edges the floor is currently hiding, so the setting's cost is visible.
+  const hiddenByFloor = BET_MARKETS.filter(
+    (m) => (pointsOf(m.value) ?? 0) > 0 && marketProbs[m.value] < minProbability
+  ).length;
   const rankOf = new Map<BetMarket, number>(topPicks.map((p, i) => [p.market, i + 1]));
 
   const valueCount = BET_MARKETS.filter((m) => (edgeOf(m.value) ?? 0) > 0).length;
@@ -285,6 +299,28 @@ export function BetSlipCard({
         recuerda que eso solo significa que <strong className="text-ink">el modelo discrepa del mercado</strong>,
         no que tenga razón.
       </p>
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-line pb-3">
+        <label className="flex items-center gap-1.5" title="El valor positivo siempre favorece las cuotas largas. Este mínimo descarta apuestas que el modelo espera perder más veces de las que gana — dónde ponerlo es tu tolerancia al riesgo, no un dato del modelo.">
+          <span className="label-eyebrow text-[0.65rem] text-ink-soft">Prob. mínima para destacar</span>
+          <select
+            value={minProbability}
+            onChange={(e) => setMinProbability(Number(e.target.value))}
+            className="font-numeric border border-line bg-paper-raised px-2 py-1 text-xs text-ink-soft outline-none focus:border-pitch"
+          >
+            {MIN_PROBABILITY_OPTIONS.map((v) => (
+              <option key={v} value={v}>
+                {v === 0 ? "sin mínimo" : `${(v * 100).toFixed(0)}%`}
+              </option>
+            ))}
+          </select>
+        </label>
+        {hiddenByFloor > 0 && (
+          <span className="text-[0.65rem] text-ink-soft">
+            {hiddenByFloor} con valor positivo por debajo del {(minProbability * 100).toFixed(0)}% sin destacar
+          </span>
+        )}
+      </div>
 
       {!oddsLoading && feed.books.length > 0 && (
         <div className="mb-4 flex flex-wrap items-end gap-3 border border-line bg-paper-raised p-3">
