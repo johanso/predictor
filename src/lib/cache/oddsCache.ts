@@ -78,11 +78,28 @@ export async function getOddsForFixture(
   return { odds: cached, quotaSpent: 0, error: null };
 }
 
+/**
+ * A dev server started before `prisma migrate` keeps the previously generated client
+ * in module scope, so a newly added model is simply `undefined` and every call on it
+ * fails with an unhelpful "cannot read properties of undefined". Name the actual
+ * problem instead — the fix is a restart, not anything in this file.
+ */
+function oddsTable() {
+  const table = prisma.oddsSnapshot;
+  if (!table) {
+    throw new OddsApiError(
+      "El cliente de Prisma no conoce la tabla OddsSnapshot. Reinicia el servidor de desarrollo para que cargue el cliente regenerado.",
+      500
+    );
+  }
+  return table;
+}
+
 async function readCache(competitionCode: string, fixture: FixtureRef): Promise<CachedOdds[]> {
   // Match on kickoff time first (cheap, indexed), then confirm the teams — the stored
   // names come from odds-api.io and won't equal football-data.org's spelling.
   const window = 36 * 60 * 60 * 1000;
-  const rows = await prisma.oddsSnapshot.findMany({
+  const rows = await oddsTable().findMany({
     where: {
       competitionCode,
       matchUtcDate: {
@@ -167,7 +184,7 @@ export async function refreshCompetitionOdds(competitionCode: string, leagueSlug
           fetchedAt: new Date(),
         };
         return [
-          prisma.oddsSnapshot.upsert({
+          oddsTable().upsert({
             where: { eventId_bookmaker: { eventId: String(event.id), bookmaker } },
             create: { eventId: String(event.id), bookmaker, ...data },
             update: data,
