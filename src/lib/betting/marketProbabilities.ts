@@ -34,6 +34,8 @@ export function marketProbabilities(prediction: MatchPrediction, derived: Derive
 export interface MarketEdge {
   market: BetMarket;
   odds: number;
+  /** What the model gives this outcome. Surfaced because it is half the trade-off. */
+  probability: number;
   /** Model probability minus the one the price implies, in absolute terms (0.04 = 4 points). */
   points: number;
   /** Expected value per unit staked. Reported but never used for ranking — see below. */
@@ -41,8 +43,20 @@ export interface MarketEdge {
 }
 
 /**
- * The strongest positive edge among the priced markets, or null when none beats its
- * own price.
+ * Positive expected value alone will always favour long odds — that is what "value"
+ * means, not a flaw in the ranking. But a bet the model itself expects to lose seven
+ * times in ten is a different proposition from a even-money one with the same edge,
+ * and which of the two is acceptable is a risk preference, not a mathematical fact.
+ *
+ * So the floor is a setting, not a constant, and the caller owns it. This default
+ * keeps recommendations at or near a coin flip; drop it to see longshots, raise it to
+ * only ever back outcomes the model actually expects to happen.
+ */
+export const DEFAULT_MIN_PROBABILITY = 0.4;
+
+/**
+ * The strongest positive edge among the priced markets, ignoring outcomes the model
+ * rates below `minProbability`. Null when nothing qualifies.
  *
  * Ranked by percentage points rather than EV%, for the same reason the bet slip is:
  * EV% divides by the stake, so identical disagreement looks larger at long odds and
@@ -51,9 +65,24 @@ export interface MarketEdge {
  */
 export function bestEdge(
   probabilities: Record<BetMarket, number>,
-  odds: Partial<Record<BetMarket, number>>
+  odds: Partial<Record<BetMarket, number>>,
+  minProbability: number = DEFAULT_MIN_PROBABILITY
 ): MarketEdge | null {
-  let best: MarketEdge | null = null;
+  return positiveEdges(probabilities, odds).find((e) => e.probability >= minProbability) ?? null;
+}
+
+/**
+ * Every market whose real price beats the model's fair odds, strongest first.
+ *
+ * Returned unfiltered so the probability floor can be moved in the UI without going
+ * back to the server — the trade-off between edge and likelihood is the thing the
+ * user is actually choosing between, and it should respond immediately.
+ */
+export function positiveEdges(
+  probabilities: Record<BetMarket, number>,
+  odds: Partial<Record<BetMarket, number>>
+): MarketEdge[] {
+  const edges: MarketEdge[] = [];
 
   for (const [market, price] of Object.entries(odds) as [BetMarket, number][]) {
     if (!(price > 1)) continue;
@@ -62,8 +91,8 @@ export function bestEdge(
 
     const points = p - 1 / price;
     if (points <= 0) continue;
-    if (!best || points > best.points) best = { market, odds: price, points, ev: p * price - 1 };
+    edges.push({ market, odds: price, probability: p, points, ev: p * price - 1 });
   }
 
-  return best;
+  return edges.sort((a, b) => b.points - a.points);
 }

@@ -20,18 +20,31 @@ export interface FixtureFavorite {
   favorite: "home" | "draw" | "away";
   favoriteLabel: string;
   favoriteProbability: number;
-  /** Best positive edge against the real price, precomputed server-side. */
-  bestValue?: {
+  /** Every market beating its real price, strongest first. Filtered client-side. */
+  edges?: {
     market: string;
     label: string;
     odds: number;
+    probability: number;
     points: number;
     ev: number;
-    bookmaker: string;
-  } | null;
+  }[];
+  bookmaker?: string | null;
 }
 
+/**
+ * Positive expected value always favours long odds, so without a floor the top of
+ * the list fills with outcomes the model itself expects to lose. Where to put that
+ * floor is a risk preference, not a fact, so it is a control rather than a constant.
+ */
+const MIN_PROBABILITY_OPTIONS = [0, 0.3, 0.4, 0.5, 0.6];
+const DEFAULT_MIN_PROBABILITY = 0.4;
+
 const FAVORITE_TONE = { home: "text-pitch", away: "text-sky", draw: "text-gold" } as const;
+
+function bestEdgeAbove(pred: FixtureFavorite | undefined, floor: number) {
+  return pred?.edges?.find((e) => e.probability >= floor) ?? null;
+}
 
 type VenueFilter = "all" | "home" | "away";
 type SortMode = "date" | "probability" | "value";
@@ -63,13 +76,16 @@ function FixtureRow({
   pred,
   onSelect,
   dateLabel,
+  minProbability,
 }: {
   f: FixtureOption;
   pred: FixtureFavorite | undefined;
   onSelect: (fixture: FixtureOption) => void;
   /** Shown when the row isn't already grouped under a date header (probability sort mode). */
   dateLabel?: string;
+  minProbability: number;
 }) {
+  const edge = bestEdgeAbove(pred, minProbability);
   return (
     <button
       onClick={() => onSelect(f)}
@@ -95,13 +111,14 @@ function FixtureRow({
           {pred.favorite === "draw" ? "Empate" : pred.favoriteLabel} {formatPercent(pred.favoriteProbability)}
         </span>
       )}
-      <span className="font-numeric w-36 shrink-0 text-right text-[0.65rem]">
-        {pred?.bestValue ? (
+      <span className="font-numeric w-44 shrink-0 text-right text-[0.65rem]">
+        {edge ? (
           <span
             className="text-result-win"
-            title={`${pred.bestValue.label} a ${pred.bestValue.odds.toFixed(2)} en ${pred.bestValue.bookmaker}. El modelo la da ${(pred.bestValue.points * 100).toFixed(1)} puntos por encima de lo que implica la cuota.`}
+            title={`${edge.label} a ${edge.odds.toFixed(2)}${pred?.bookmaker ? ` en ${pred.bookmaker}` : ""}. El modelo le da ${(edge.probability * 100).toFixed(1)}% de probabilidad, ${(edge.points * 100).toFixed(1)} puntos por encima del ${((1 / edge.odds) * 100).toFixed(1)}% que implica la cuota. EV ${(edge.ev * 100).toFixed(1)}%.`}
           >
-            {pred.bestValue.label} <span className="opacity-70">+{(pred.bestValue.points * 100).toFixed(1)} pp</span>
+            {edge.label} <span className="text-ink-soft">{(edge.probability * 100).toFixed(0)}%</span>{" "}
+            <span className="opacity-70">+{(edge.points * 100).toFixed(1)}pp</span>
           </span>
         ) : (
           <span className="text-ink-soft opacity-40">—</span>
@@ -126,6 +143,7 @@ export function FixturesList({
   const [teamFilter, setTeamFilter] = useState("");
   const [venueFilter, setVenueFilter] = useState<VenueFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("date");
+  const [minProbability, setMinProbability] = useState(DEFAULT_MIN_PROBABILITY);
   const sectionRefs = useRef(new Map<string, HTMLDivElement>());
 
   const filtered = useMemo(() => {
@@ -175,15 +193,22 @@ export function FixturesList({
   // priced edge sink to the bottom rather than disappearing.
   const sortedByValue = useMemo(() => {
     return [...filtered].sort((a, b) => {
-      const va = predictions?.[a.id]?.bestValue?.points ?? -1;
-      const vb = predictions?.[b.id]?.bestValue?.points ?? -1;
+      const va = bestEdgeAbove(predictions?.[a.id], minProbability)?.points ?? -1;
+      const vb = bestEdgeAbove(predictions?.[b.id], minProbability)?.points ?? -1;
       return vb - va;
     });
-  }, [filtered, predictions]);
+  }, [filtered, predictions, minProbability]);
 
   const valueCount = useMemo(
-    () => filtered.filter((f) => predictions?.[f.id]?.bestValue).length,
-    [filtered, predictions]
+    () => filtered.filter((f) => bestEdgeAbove(predictions?.[f.id], minProbability)).length,
+    [filtered, predictions, minProbability]
+  );
+
+  // How many fixtures the floor is currently hiding — makes the cost of the setting
+  // visible instead of silently shrinking the list.
+  const hiddenByFloor = useMemo(
+    () => filtered.filter((f) => (predictions?.[f.id]?.edges?.length ?? 0) > 0 && !bestEdgeAbove(predictions?.[f.id], minProbability)).length,
+    [filtered, predictions, minProbability]
   );
 
   function jumpToDate(dateKey: string) {
@@ -232,7 +257,29 @@ export function FixturesList({
             Por valor{valueCount > 0 && ` (${valueCount})`}
           </button>
         </div>
+        <label className="flex items-center gap-1.5" title="El valor positivo siempre favorece las cuotas largas. Este mínimo descarta apuestas que el modelo espera perder — dónde ponerlo es tu tolerancia al riesgo, no un dato.">
+          <span className="label-eyebrow text-[0.65rem] text-ink-soft">Prob. mínima</span>
+          <select
+            value={minProbability}
+            onChange={(e) => setMinProbability(Number(e.target.value))}
+            className="font-numeric border border-line bg-paper-raised px-2 py-1.5 text-xs text-ink-soft outline-none focus:border-pitch"
+          >
+            {MIN_PROBABILITY_OPTIONS.map((v) => (
+              <option key={v} value={v}>
+                {v === 0 ? "sin mínimo" : `${(v * 100).toFixed(0)}%`}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
+
+      {sortMode === "value" && hiddenByFloor > 0 && (
+        <p className="mb-2 text-[0.65rem] text-ink-soft">
+          {hiddenByFloor} partido{hiddenByFloor === 1 ? "" : "s"} con valor positivo pero por debajo del{" "}
+          {(minProbability * 100).toFixed(0)}% — son apuestas que el modelo espera perder más veces de las que gana.
+          Baja el mínimo para verlas.
+        </p>
+      )}
 
       {sortMode === "date" && groups.length > 1 && (
         <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1">
@@ -259,13 +306,14 @@ export function FixturesList({
                 pred={predictions?.[f.id]}
                 onSelect={onSelect}
                 dateLabel={new Date(f.utcDate).toLocaleDateString("es", { day: "2-digit", month: "short" })}
+                minProbability={minProbability}
               />
             ))
           : groups.map((g) => (
               <div key={g.dateKey} ref={(el) => void (el ? sectionRefs.current.set(g.dateKey, el) : sectionRefs.current.delete(g.dateKey))}>
                 <p className="label-eyebrow px-4 bg-slate-100 sticky top-0 border-b border-t border-line py-2 text-[0.65rem] text-ink-soft">{g.label}</p>
                 {g.fixtures.map((f) => (
-                  <FixtureRow key={f.id} f={f} pred={predictions?.[f.id]} onSelect={onSelect} />
+                  <FixtureRow key={f.id} f={f} pred={predictions?.[f.id]} onSelect={onSelect} minProbability={minProbability} />
                 ))}
               </div>
             ))}

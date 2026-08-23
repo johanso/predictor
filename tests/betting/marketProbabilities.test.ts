@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bestEdge, marketProbabilities } from "@/lib/betting/marketProbabilities";
+import { bestEdge, positiveEdges, marketProbabilities } from "@/lib/betting/marketProbabilities";
 import { buildDerivedMarkets, buildPredictionFromLambdas } from "@/lib/poisson";
 import { BET_MARKETS, type BetMarket } from "@/lib/betting/settle";
 
@@ -40,12 +40,41 @@ describe("marketProbabilities", () => {
 describe("bestEdge", () => {
   it("returns null when no price beats its own fair odds", () => {
     const fair = (m: BetMarket) => 1 / probs[m] - 0.01; // every price slightly short
-    expect(bestEdge(probs, { home: fair("home"), draw: fair("draw"), away: fair("away") })).toBeNull();
+    expect(bestEdge(probs, { home: fair("home"), draw: fair("draw"), away: fair("away") }, 0)).toBeNull();
   });
 
   it("ignores markets with no price and unusable odds", () => {
-    expect(bestEdge(probs, {})).toBeNull();
-    expect(bestEdge(probs, { home: 1, draw: 0.5 })).toBeNull();
+    expect(bestEdge(probs, {}, 0)).toBeNull();
+    expect(bestEdge(probs, { home: 1, draw: 0.5 }, 0)).toBeNull();
+  });
+
+  /**
+   * The reason the floor exists: positive EV always favours long odds, so without it
+   * the top recommendation can be an outcome the model expects to lose most of the
+   * time. Reproduces the case that prompted it — a home side rated ~31% priced at
+   * 4.00 outranks a genuine favourite until a floor rules it out.
+   */
+  it("respects the minimum probability floor", () => {
+    const longshot = 1 / (probs.away - 0.06); // biggest edge, but the least likely outcome
+    const solid = 1 / (probs.home - 0.02);
+    const odds = { away: longshot, home: solid };
+
+    expect(bestEdge(probs, odds, 0)?.market).toBe("away");
+    expect(bestEdge(probs, odds, probs.away + 0.01)?.market).toBe("home");
+    expect(bestEdge(probs, odds, 0.99)).toBeNull();
+  });
+
+  it("reports every positive edge, strongest first, for client-side filtering", () => {
+    const odds = {
+      home: 1 / (probs.home - 0.02),
+      away: 1 / (probs.away - 0.06),
+      draw: (1 / probs.draw) * 0.9, // no edge: shorter than fair, so the book wins it
+    };
+    const all = positiveEdges(probs, odds);
+
+    expect(all.map((e) => e.market)).toEqual(["away", "home"]);
+    expect(all[0].points).toBeGreaterThan(all[1].points);
+    expect(all.every((e) => e.probability > 0)).toBe(true);
   });
 
   /**
@@ -62,7 +91,7 @@ describe("bestEdge", () => {
     const homeOdds = 1 / (probs.home - 0.04);
 
     // Ranked by points, the home side wins — it has the bigger real edge.
-    expect(bestEdge(probs, { draw: drawOdds, home: homeOdds })?.market).toBe("home");
+    expect(bestEdge(probs, { draw: drawOdds, home: homeOdds }, 0)?.market).toBe("home");
 
     // And the trap is real: the row that loses the ranking has the higher EV%,
     // so ranking by EV% would have picked the weaker edge.
@@ -73,7 +102,7 @@ describe("bestEdge", () => {
 
   it("reports the points and EV of the market it picked", () => {
     const odds = 1 / (probs.over_2_5 - 0.05);
-    const edge = bestEdge(probs, { over_2_5: odds });
+    const edge = bestEdge(probs, { over_2_5: odds }, 0);
     expect(edge?.market).toBe("over_2_5");
     expect(edge?.points).toBeCloseTo(0.05, 6);
     expect(edge?.ev).toBeCloseTo(probs.over_2_5 * odds - 1, 10);

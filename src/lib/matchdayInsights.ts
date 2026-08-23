@@ -3,7 +3,7 @@ import { getWeightedTeamStats } from "@/lib/cache/standingsCache";
 import { getOddsForFixture } from "@/lib/cache/oddsCache";
 import { buildDerivedMarkets, buildPredictionFromLambdas, buildSummary, predictMatchWithMatrix } from "@/lib/poisson";
 import { fittedLambdas } from "@/lib/poisson/dixonColesFit";
-import { bestEdge, marketProbabilities, type MarketEdge } from "@/lib/betting/marketProbabilities";
+import { positiveEdges, marketProbabilities, type MarketEdge } from "@/lib/betting/marketProbabilities";
 import { BET_MARKETS } from "@/lib/betting/settle";
 import type { MatchPrediction, DerivedMarkets } from "@/types/domain";
 
@@ -13,8 +13,12 @@ export interface FixtureInsight {
   favorite: "home" | "draw" | "away";
   favoriteLabel: string;
   favoriteProbability: number;
-  /** Strongest positive edge against the cached real price, or null when there is none. */
-  bestValue: (MarketEdge & { label: string; bookmaker: string }) | null;
+  /**
+   * Every market beating its real price, strongest first. Sent unfiltered so the
+   * probability floor can be moved client-side without another round trip.
+   */
+  edges: (MarketEdge & { label: string })[];
+  bookmaker: string | null;
 }
 
 interface FixtureRef {
@@ -81,7 +85,8 @@ export async function getMatchdayInsights(
       favorite: summary.favorite,
       favoriteLabel: summary.favoriteLabel,
       favoriteProbability: summary.favoriteProbability,
-      bestValue: null,
+      edges: [],
+      bookmaker: null,
     };
 
     // Odds are best-effort: a fixture the provider doesn't carry, or an exhausted
@@ -94,13 +99,14 @@ export async function getMatchdayInsights(
       });
       const book = odds[0];
       if (book) {
-        const edge = bestEdge(marketProbabilities(prediction, derived), book.markets);
-        if (edge) {
-          insight.bestValue = { ...edge, label: MARKET_LABELS[edge.market] ?? edge.market, bookmaker: book.bookmaker };
-        }
+        insight.bookmaker = book.bookmaker;
+        insight.edges = positiveEdges(marketProbabilities(prediction, derived), book.markets).map((e) => ({
+          ...e,
+          label: MARKET_LABELS[e.market] ?? e.market,
+        }));
       }
     } catch {
-      // leave bestValue null
+      // leave edges empty
     }
 
     insights[fixture.id] = insight;
