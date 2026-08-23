@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { config } from "@/lib/config";
 import { getOddsForFixture } from "@/lib/cache/oddsCache";
-import { getOddsQuota } from "@/lib/oddsApi/client";
+import { getOddsQuota } from "@/lib/oddsApi/quota";
 import { ODDS_API_LEAGUE_SLUGS } from "@/lib/oddsApi/leagues";
 
 const querySchema = z.object({
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ configured: false, supported: false, odds: [], quota: null, error: null });
   }
   if (!ODDS_API_LEAGUE_SLUGS[competitionCode]) {
-    return NextResponse.json({ configured: true, supported: false, odds: [], quota: getOddsQuota(), error: null });
+    return NextResponse.json({ configured: true, supported: false, odds: [], quota: await getOddsQuota(), error: null });
   }
 
   const kickoff = new Date(utcDate);
@@ -50,11 +50,11 @@ export async function GET(request: Request) {
         fetchedAt: o.fetchedAt.toISOString(),
       })),
       quotaSpent,
-      quota: getOddsQuota(),
+      quota: await getOddsQuota(),
       error,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Error consultando las cuotas.";
-    return NextResponse.json({ configured: true, supported: true, odds: [], quota: getOddsQuota(), error: message }, { status: 502 });
+    return NextResponse.json({ configured: true, supported: true, odds: [], quota: await getOddsQuota(), error: message }, { status: 502 });
   }
 }

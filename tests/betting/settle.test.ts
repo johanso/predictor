@@ -1,4 +1,47 @@
 import { describe, it, expect } from "vitest";
+
+describe("didMarketWin — marca cada equipo", () => {
+  it("settles home_scores on the home side's goals alone", () => {
+    expect(didMarketWin("home_scores", 1, 0)).toBe(true);
+    expect(didMarketWin("home_scores", 3, 5)).toBe(true); // losing but scoring still wins
+    expect(didMarketWin("home_scores", 0, 0)).toBe(false);
+    expect(didMarketWin("home_scores", 0, 2)).toBe(false);
+  });
+
+  it("settles away_scores on the away side's goals alone", () => {
+    expect(didMarketWin("away_scores", 0, 1)).toBe(true);
+    expect(didMarketWin("away_scores", 4, 2)).toBe(true);
+    expect(didMarketWin("away_scores", 0, 0)).toBe(false);
+    expect(didMarketWin("away_scores", 2, 0)).toBe(false);
+  });
+
+  it("agrees with the clean-sheet reading of the same scoreline", () => {
+    // "Home scores" is the exact complement of the away side keeping a clean sheet.
+    for (const [h, a] of [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [2, 2],
+      [3, 1],
+    ]) {
+      expect(didMarketWin("home_scores", h, a)).toBe(h > 0);
+      expect(didMarketWin("away_scores", h, a)).toBe(a > 0);
+    }
+  });
+
+  it("is consistent with btts: both scoring means both single markets won", () => {
+    for (const [h, a] of [
+      [1, 1],
+      [2, 3],
+      [0, 1],
+      [1, 0],
+      [0, 0],
+    ]) {
+      const both = didMarketWin("btts_yes", h, a);
+      expect(both).toBe(didMarketWin("home_scores", h, a) && didMarketWin("away_scores", h, a));
+    }
+  });
+});
 import { didMarketWin, settleBet } from "@/lib/betting/settle";
 
 describe("didMarketWin", () => {

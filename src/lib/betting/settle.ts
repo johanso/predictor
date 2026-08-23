@@ -10,7 +10,9 @@ export type BetMarket =
   | "under_2_5"
   | "double_1x"
   | "double_12"
-  | "double_x2";
+  | "double_x2"
+  | "home_scores"
+  | "away_scores";
 
 export const BET_MARKETS: { value: BetMarket; label: string }[] = [
   { value: "home", label: "Gana Local" },
@@ -25,6 +27,8 @@ export const BET_MARKETS: { value: BetMarket; label: string }[] = [
   { value: "double_1x", label: "Doble oportunidad: 1X" },
   { value: "double_12", label: "Doble oportunidad: 12" },
   { value: "double_x2", label: "Doble oportunidad: X2" },
+  { value: "home_scores", label: "Marca el local" },
+  { value: "away_scores", label: "Marca el visitante" },
 ];
 
 export function didMarketWin(market: BetMarket, actualHomeGoals: number, actualAwayGoals: number): boolean {
@@ -55,6 +59,10 @@ export function didMarketWin(market: BetMarket, actualHomeGoals: number, actualA
       return actualHomeGoals !== actualAwayGoals;
     case "double_x2":
       return actualHomeGoals <= actualAwayGoals;
+    case "home_scores":
+      return actualHomeGoals > 0;
+    case "away_scores":
+      return actualAwayGoals > 0;
   }
 }
 

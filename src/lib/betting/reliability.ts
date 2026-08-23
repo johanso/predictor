@@ -33,6 +33,8 @@ const RELIABILITY: Record<BetMarket, MarketReliability> = {
   double_1x: { skillPct: 0.92, t: 0.64 },
   double_12: { skillPct: -0.67, t: -0.92 },
   double_x2: { skillPct: 1.13, t: 0.84 },
+  home_scores: { skillPct: 0.18, t: 0.14 },
+  away_scores: { skillPct: -0.94, t: -0.81 },
 };
 
 export type ReliabilityVerdict = "señal" | "ruido" | "peor";

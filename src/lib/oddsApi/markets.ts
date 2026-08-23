@@ -74,6 +74,16 @@ export function mapMarkets(markets: OddsApiMarket[]): Partial<Record<BetMarket, 
     if (under) out[underKey] = under;
   }
 
+  // "Team scores" is the over side of that team's 0.5 goal line. Bookmakers also
+  // publish it inverted as a clean sheet for the opponent, which is used as the
+  // fallback: a clean sheet for the away side is exactly the home side not scoring.
+  const homeGoals = totalsLine(byName.get("Team Total Goals Home"), 0.5);
+  const awayGoals = totalsLine(byName.get("Team Total Goals Away"), 0.5);
+  const homeScores = num(homeGoals?.over) ?? num(byName.get("Clean Sheet Away")?.odds[0]?.no);
+  const awayScores = num(awayGoals?.over) ?? num(byName.get("Clean Sheet Home")?.odds[0]?.no);
+  if (homeScores) out.home_scores = homeScores;
+  if (awayScores) out.away_scores = awayScores;
+
   return out;
 }
 

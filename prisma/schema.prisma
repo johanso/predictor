@@ -187,6 +187,18 @@ model OddsSnapshot {
   @@index([competitionCode, matchUtcDate])
 }
 
+// One row per request sent to odds-api.io, kept so the hourly and daily caps survive
+// a server restart. An in-memory counter would reset to zero every time the dev
+// server reloads and happily blow through a 500/day limit it believes is untouched.
+// Rows older than the daily window are pruned on write, so this stays tiny.
+model OddsApiCall {
+  id        Int      @id @default(autoincrement())
+  calledAt  DateTime @default(now())
+  endpoint  String
+
+  @@index([calledAt])
+}
+
 // Singleton row (id always 1) holding the user's self-reported starting balance.
 // currentBalance is never stored — it's startingBalance + sum(profit) of settled Bets.
 model Bankroll {

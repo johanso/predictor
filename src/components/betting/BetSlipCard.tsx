@@ -18,6 +18,7 @@ const GROUPS: { title: string; markets: BetMarket[] }[] = [
   { title: "Doble oportunidad", markets: ["double_1x", "double_12", "double_x2"] },
   { title: "Ambos equipos marcan", markets: ["btts_yes", "btts_no"] },
   { title: "Total de goles", markets: ["over_1_5", "under_1_5", "over_2_5", "under_2_5"] },
+  { title: "Marca cada equipo", markets: ["home_scores", "away_scores"] },
 ];
 
 const LABELS = Object.fromEntries(BET_MARKETS.map((m) => [m.value, m.label])) as Record<BetMarket, string>;
@@ -88,6 +89,8 @@ export function BetSlipCard({
       double_1x: prediction.doubleChance.oneX.probability,
       double_12: prediction.doubleChance.oneTwo.probability,
       double_x2: prediction.doubleChance.xTwo.probability,
+      home_scores: prediction.derivedMarkets.homeOver05.probability,
+      away_scores: prediction.derivedMarkets.awayOver05.probability,
     };
   }, [prediction]);
 
@@ -269,7 +272,7 @@ export function BetSlipCard({
   }
 
   return (
-    <Card title="Control de apuestas">
+    <Card title="">
       <p className="mb-3 text-xs text-ink-soft">
         Introduce las cuotas reales de tu casa. Se marca en verde donde el modelo las considera altas —
         recuerda que eso solo significa que <strong className="text-ink">el modelo discrepa del mercado</strong>,

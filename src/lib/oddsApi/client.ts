@@ -1,4 +1,5 @@
 import { config } from "@/lib/config";
+import { recordOddsCall } from "./quota";
 import type { OddsApiMarket } from "./markets";
 import type { OddsEvent } from "./matchTeams";
 
@@ -15,47 +16,11 @@ export class OddsApiError extends Error {
 // Free plan: 100 requests/hour, 500/day. The batch endpoint takes 10 events at a
 // time, so one league's whole matchday costs a single call — see fetchOddsForEvents.
 export const MAX_EVENTS_PER_REQUEST = 10;
-const HOURLY_LIMIT = 100;
-const DAILY_LIMIT = 500;
-
-let callTimestamps: number[] = [];
-
-function prune(now: number): void {
-  callTimestamps = callTimestamps.filter((t) => now - t < 24 * 60 * 60 * 1000);
-}
-
-export interface OddsQuotaStatus {
-  lastHour: number;
-  hourlyLimit: number;
-  lastDay: number;
-  dailyLimit: number;
-}
-
-export function getOddsQuota(): OddsQuotaStatus {
-  const now = Date.now();
-  prune(now);
-  return {
-    lastHour: callTimestamps.filter((t) => now - t < 60 * 60 * 1000).length,
-    hourlyLimit: HOURLY_LIMIT,
-    lastDay: callTimestamps.length,
-    dailyLimit: DAILY_LIMIT,
-  };
-}
-
-function recordCall(): void {
-  const now = Date.now();
-  const quota = getOddsQuota();
-  if (quota.lastHour >= HOURLY_LIMIT) {
-    throw new OddsApiError("Límite de la hora alcanzado en odds-api.io (100/hora). Inténtalo más tarde.", 429);
-  }
-  if (quota.lastDay >= DAILY_LIMIT) {
-    throw new OddsApiError("Límite diario alcanzado en odds-api.io (500/día).", 429);
-  }
-  callTimestamps.push(now);
-}
 
 async function oddsFetch<T>(path: string, params: Record<string, string>): Promise<T> {
-  recordCall();
+  // Counted before the request leaves, and persisted — see quota.ts for why the
+  // count cannot live in memory the way the football-data.org one does.
+  await recordOddsCall(path);
 
   const url = new URL(`${config.oddsApi.baseUrl}${path}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
