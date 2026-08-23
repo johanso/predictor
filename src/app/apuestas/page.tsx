@@ -3,6 +3,8 @@ import { getBankrollStatus, getMonthlySummaries, getBetsForMonth, getBankrollHis
 import { BankrollCard } from "@/components/betting/BankrollCard";
 import { BankrollChart } from "@/components/betting/BankrollChart";
 import { MonthlyBetsTable } from "@/components/betting/MonthlyBetsTable";
+import { SettleButton } from "@/components/betting/SettleButton";
+import { prisma } from "@/lib/db";
 import { Card } from "@/components/ui/Card";
 import { formatPercent } from "@/lib/format";
 
@@ -18,7 +20,15 @@ function StatTile({ label, value, tone }: { label: string; value: string; tone?:
 
 export default async function ApuestasPage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
   const { month: monthParam } = await searchParams;
-  const [bankroll, summaries, history] = await Promise.all([getBankrollStatus(), getMonthlySummaries(), getBankrollHistory()]);
+  const [bankroll, summaries, history, pendingCount, lastFetched] = await Promise.all([
+    getBankrollStatus(),
+    getMonthlySummaries(),
+    getBankrollHistory(),
+    prisma.bet.count({ where: { status: "pending" } }),
+    // Most recent results fetch across the competitions in play — what "up to date"
+    // actually means for settlement.
+    prisma.competition.findFirst({ where: { fetchedAt: { not: null } }, orderBy: { fetchedAt: "desc" }, select: { fetchedAt: true } }),
+  ]);
 
   const activeMonth = monthParam && summaries.some((s) => s.month === monthParam) ? monthParam : (summaries[0]?.month ?? null);
   const activeSummary = summaries.find((s) => s.month === activeMonth) ?? null;
@@ -34,11 +44,13 @@ export default async function ApuestasPage({ searchParams }: { searchParams: Pro
           <h1 className="mt-2 text-3xl font-semibold uppercase tracking-tight">Control de apuestas</h1>
           <p className="mt-2 max-w-lg text-sm text-chrome-ink/70">
             Registro real de tus apuestas — cuotas y stakes que ingresaste a mano, liquidado
-            automáticamente contra los resultados reales cuando cada partido se juega.
+            contra los resultados reales. Se actualiza solo al refrescar una liga; usa
+            &quot;Actualizar resultados&quot; para forzarlo cuando un partido ya terminó.
           </p>
         </div>
       </header>
       <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 px-6 py-10">
+        <SettleButton pendingCount={pendingCount} lastCheckedAt={lastFetched?.fetchedAt?.toISOString() ?? null} />
         <BankrollCard status={bankroll} />
         <BankrollChart points={history} startingBalance={bankroll.startingBalance} />
 
