@@ -6,7 +6,9 @@ import { getBetsForMonth } from "@/lib/betting/stats";
 
 const marketValues = BET_MARKETS.map((m) => m.value) as [string, ...string[]];
 
-const bodySchema = z.object({
+/** Sent from the predictor: tied to a real fixture, with the model's probability behind it. */
+const modelBetSchema = z.object({
+  isManual: z.literal(false).optional(),
   competitionCode: z.string().min(1),
   homeTeamId: z.number().int(),
   homeTeamName: z.string().min(1),
@@ -21,6 +23,24 @@ const bodySchema = z.object({
   suggestedStake: z.number().gte(0),
 });
 
+/**
+ * Typed in by hand. No competition, no team ids, no model probability — it may be a
+ * sport the app knows nothing about — so all it needs is enough to name the event,
+ * price it, and say where the pick came from.
+ */
+const manualBetSchema = z.object({
+  isManual: z.literal(true),
+  source: z.string().min(1).max(60),
+  homeTeamName: z.string().min(1),
+  awayTeamName: z.string().min(1),
+  matchUtcDate: z.string().min(1),
+  marketLabel: z.string().min(1).max(80),
+  odds: z.number().gt(1),
+  stake: z.number().gte(0),
+});
+
+const bodySchema = z.union([manualBetSchema, modelBetSchema]);
+
 // No server-side gate here (unlike /api/predictions) — this is the user's own
 // subjective record of a real bet they placed, not data feeding model calibration.
 export async function POST(request: Request) {
@@ -31,21 +51,38 @@ export async function POST(request: Request) {
   }
 
   const data = parsed.data;
+
+  const common = {
+    homeTeamName: data.homeTeamName,
+    awayTeamName: data.awayTeamName,
+    matchUtcDate: new Date(data.matchUtcDate),
+    marketLabel: data.marketLabel,
+    odds: data.odds,
+    stake: data.stake,
+  };
+
   const bet = await prisma.bet.create({
-    data: {
-      competitionCode: data.competitionCode,
-      homeTeamId: data.homeTeamId,
-      homeTeamName: data.homeTeamName,
-      awayTeamId: data.awayTeamId,
-      awayTeamName: data.awayTeamName,
-      matchUtcDate: new Date(data.matchUtcDate),
-      market: data.market,
-      marketLabel: data.marketLabel,
-      modelProbability: data.modelProbability,
-      odds: data.odds,
-      stake: data.stake,
-      suggestedStake: data.suggestedStake,
-    },
+    data:
+      data.isManual === true
+        ? {
+            ...common,
+            isManual: true,
+            source: data.source,
+            // `market` doubles as the settlement key for model bets; a manual one has
+            // no such key, so it just mirrors the label the user typed.
+            market: data.marketLabel,
+          }
+        : {
+            ...common,
+            isManual: false,
+            source: "modelo",
+            competitionCode: data.competitionCode,
+            homeTeamId: data.homeTeamId,
+            awayTeamId: data.awayTeamId,
+            market: data.market,
+            modelProbability: data.modelProbability,
+            suggestedStake: data.suggestedStake,
+          },
   });
 
   return NextResponse.json({ id: bet.id, createdAt: bet.createdAt });

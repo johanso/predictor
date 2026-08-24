@@ -137,24 +137,38 @@ model Prediction {
 // Match cache by (homeTeamId, awayTeamId, matchUtcDate) with a tolerance window
 // since it targets one specific scheduled fixture rather than "the next match".
 model Bet {
-  id                  Int         @id @default(autoincrement())
-  competitionCode     String
-  competition         Competition @relation(fields: [competitionCode], references: [code])
-  homeTeamId          Int
+  id                  Int          @id @default(autoincrement())
+
+  // Where the pick came from. "modelo" for anything sent from the predictor — fixed,
+  // since the app knows it produced it — or free text the user types for a manual one
+  // (a tipster's name, a hunch, wherever). isManual is what actually branches
+  // behaviour: manual bets skip auto-settlement and are closed by hand, because they
+  // may be sports or competitions the API does not carry at all.
+  source              String       @default("modelo")
+  isManual            Boolean      @default(false)
+
+  // Null on manual bets: a tennis match or an unlisted league has no competition,
+  // no football-data team ids, and no model probability behind it.
+  competitionCode     String?
+  competition         Competition? @relation(fields: [competitionCode], references: [code])
+  homeTeamId          Int?
+  awayTeamId          Int?
+  modelProbability    Float?
+  suggestedStake      Float? // what fractional-Kelly suggested, kept for reference only
+
+  // Kept required: every bet needs something to name it and a date to file it under,
+  // even when it is "Nadal vs Alcaraz" typed by hand.
   homeTeamName        String
-  awayTeamId          Int
   awayTeamName        String
   matchUtcDate        DateTime
-  createdAt           DateTime    @default(now())
+  createdAt           DateTime     @default(now())
 
-  market              String // "home"|"draw"|"away"|"btts_yes"|"btts_no"|"over_2_5"|"under_2_5"
+  market              String // a BetMarket value for model bets, free text for manual ones
   marketLabel         String
-  modelProbability    Float
   odds                Float // real odds the user entered — not derived from our model
   stake               Float
-  suggestedStake      Float // what fractional-Kelly suggested, kept for reference only
 
-  status              String    @default("pending") // "pending" | "won" | "lost" | "void" (match postponed/cancelled — profit fixed at 0, excluded from staked/yield/win-rate)
+  status              String    @default("pending") // "pending" | "won" | "lost" | "void" (postponed/cancelled — profit fixed at 0, excluded from staked/yield/win-rate)
   settledAt           DateTime?
   actualHomeGoals     Int?
   actualAwayGoals     Int?
@@ -164,6 +178,7 @@ model Bet {
   @@index([status])
   @@index([createdAt])
 }
+
 
 // Real bookmaker prices from odds-api.io, cached so the free plan's 500 requests a
 // day are never the limiting factor. One row per (fixture, bookmaker); the whole

@@ -298,7 +298,12 @@ async function refreshFromApi(code: string, name: string, hasHomeAway: boolean):
   // Same opportunistic pattern for real user bets — see src/lib/betting/settle.ts.
   // Matched by (teams, matchUtcDate) with a tolerance window rather than "any match
   // after createdAt", since a Bet already points at one specific scheduled fixture.
-  const pendingBets = await prisma.bet.findMany({ where: { competitionCode: code, status: "pending" } });
+  // isManual excluded on purpose: a manual bet may be another sport entirely, and
+  // even when it is football it carries no football-data team ids to match on. Those
+  // are closed by hand from the bets page.
+  const pendingBets = await prisma.bet.findMany({
+    where: { competitionCode: code, status: "pending", isManual: false },
+  });
   const betSettleOps = pendingBets.flatMap((bet) => {
     const match = completedMatches.find(
       (m) =>

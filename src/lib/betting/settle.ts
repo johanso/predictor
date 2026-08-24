@@ -71,6 +71,15 @@ export interface SettleResult {
   profit: number;
 }
 
+/**
+ * Profit on a settled bet. Shared by automatic settlement and the manual close on the
+ * bets page so the two can never disagree about what a win is worth — the bankroll is
+ * built by summing this, and two formulas would eventually drift apart.
+ */
+export function profitFor(won: boolean, odds: number, stake: number): number {
+  return won ? stake * (odds - 1) : -stake;
+}
+
 export function settleBet(
   market: BetMarket,
   odds: number,
@@ -79,5 +88,5 @@ export function settleBet(
   actualAwayGoals: number
 ): SettleResult {
   const won = didMarketWin(market, actualHomeGoals, actualAwayGoals);
-  return { won, profit: won ? stake * (odds - 1) : -stake };
+  return { won, profit: profitFor(won, odds, stake) };
 }

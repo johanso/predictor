@@ -24,8 +24,11 @@ export async function POST() {
   const cutoff = new Date(Date.now() - MATCH_DURATION_MS);
 
   const [pendingBets, pendingPredictions] = await Promise.all([
+    // Manual bets are excluded: they are closed by hand, and many are sports this
+    // refresh knows nothing about, so they must not drag a competition into the
+    // refresh list and spend a request for nothing.
     prisma.bet.findMany({
-      where: { status: "pending", matchUtcDate: { lt: cutoff } },
+      where: { status: "pending", isManual: false, matchUtcDate: { lt: cutoff } },
       select: { competitionCode: true },
     }),
     // Predictions carry no kickoff date — they are matched to whichever finished game
@@ -38,8 +41,8 @@ export async function POST() {
     }),
   ]);
 
-  const codes = [...new Set([...pendingBets, ...pendingPredictions].map((r) => r.competitionCode))].filter((code) =>
-    getCompetitionInfo(code)
+  const codes = [...new Set([...pendingBets, ...pendingPredictions].map((r) => r.competitionCode))].filter(
+    (code): code is string => code !== null && Boolean(getCompetitionInfo(code))
   );
 
   if (codes.length === 0) {
@@ -77,7 +80,7 @@ export async function POST() {
 
 async function countOutstanding() {
   const [bets, predictions] = await Promise.all([
-    prisma.bet.count({ where: { status: "pending" } }),
+    prisma.bet.count({ where: { status: "pending", isManual: false } }),
     prisma.prediction.count({ where: { evaluatedAt: null } }),
   ]);
   return { bets, predictions };

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { profitFor } from "@/lib/betting/settle";
 
 // Void = the match got postponed/cancelled, so there's no result to settle
 // against — distinct from delete (which is for correcting a logging mistake).
@@ -14,9 +15,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   const json = await request.json().catch(() => null);
-  const parsed = z.object({ action: z.literal("void") }).safeParse(json);
+  const parsed = z.object({ action: z.enum(["void", "won", "lost"]) }).safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid request body — expected { action: 'void' }." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid request body — expected { action: 'void' | 'won' | 'lost' }." },
+      { status: 400 }
+    );
   }
 
   const bet = await prisma.bet.findUnique({ where: { id: betId } });
@@ -24,12 +28,26 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "Bet not found." }, { status: 404 });
   }
   if (bet.status !== "pending") {
-    return NextResponse.json({ error: "Solo se pueden anular apuestas pendientes." }, { status: 422 });
+    return NextResponse.json({ error: "Solo se pueden cerrar apuestas pendientes." }, { status: 422 });
   }
+
+  const { action } = parsed.data;
+
+  // Won/lost by hand is only for manual bets. A model bet is settled against the real
+  // result the API reports, and letting it be closed by hand would make the record —
+  // and the yield built on it — something other than what actually happened.
+  if (action !== "void" && !bet.isManual) {
+    return NextResponse.json(
+      { error: "Las apuestas del modelo se liquidan solas con el resultado real. Usa 'Actualizar resultados'." },
+      { status: 422 }
+    );
+  }
+
+  const profit = action === "void" ? 0 : profitFor(action === "won", bet.odds, bet.stake);
 
   const updated = await prisma.bet.update({
     where: { id: betId },
-    data: { status: "void", settledAt: new Date(), profit: 0 },
+    data: { status: action, settledAt: new Date(), profit },
   });
   return NextResponse.json({ bet: updated });
 }

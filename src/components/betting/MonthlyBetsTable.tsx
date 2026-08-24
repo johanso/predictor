@@ -17,11 +17,11 @@ export function MonthlyBetsTable({ bets }: { bets: BetModel[] }) {
     router.refresh();
   }
 
-  async function handleVoid(id: number) {
+  async function settle(id: number, action: "void" | "won" | "lost") {
     await fetch(`/api/bets/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "void" }),
+      body: JSON.stringify({ action }),
     });
     router.refresh();
   }
@@ -36,6 +36,7 @@ export function MonthlyBetsTable({ bets }: { bets: BetModel[] }) {
             <tr className="label-eyebrow border-b border-line text-left text-xs text-ink-soft">
               <th className="px-2 py-2 font-normal">Fecha</th>
               <th className="px-2 py-2 font-normal">Partido</th>
+              <th className="px-2 py-2 font-normal">Fuente</th>
               <th className="px-2 py-2 font-normal">Mercado</th>
               <th className="font-numeric px-2 py-2 text-right font-normal">Prob.</th>
               <th className="font-numeric px-2 py-2 text-right font-normal">Cuota</th>
@@ -53,8 +54,13 @@ export function MonthlyBetsTable({ bets }: { bets: BetModel[] }) {
                   <span className="text-pitch">{b.homeTeamName}</span> <span className="text-ink-soft">vs</span>{" "}
                   <span className="text-sky">{b.awayTeamName}</span>
                 </td>
+                <td className="px-2 py-2">
+                  <Pill tone={b.isManual ? "sky" : "pitch"}>{b.source}</Pill>
+                </td>
                 <td className="px-2 py-2 text-xs text-ink-soft">{b.marketLabel}</td>
-                <td className="font-numeric px-2 py-2 text-right text-ink-soft">{formatPercent(b.modelProbability)}</td>
+                <td className="font-numeric px-2 py-2 text-right text-ink-soft">
+                  {b.modelProbability !== null ? formatPercent(b.modelProbability) : <span className="opacity-40">—</span>}
+                </td>
                 <td className="font-numeric px-2 py-2 text-right">{b.odds.toFixed(2)}</td>
                 <td className="font-numeric px-2 py-2 text-right">{b.stake.toFixed(2)}</td>
                 <td className="px-2 py-2 text-center">
@@ -67,8 +73,30 @@ export function MonthlyBetsTable({ bets }: { bets: BetModel[] }) {
                 </td>
                 <td className="px-2 py-2 text-right">
                   {b.status === "pending" && (
-                    <div className="flex justify-end gap-2">
-                      <button onClick={() => handleVoid(b.id)} className="label-eyebrow text-[0.6rem] text-ink-soft hover:text-gold" title="El partido se pospuso o canceló — no cuenta para profit/yield">
+                    <div className="flex justify-end gap-2 whitespace-nowrap">
+                      {/* Closing by hand is offered only for manual bets: a model bet is
+                          settled against the real result, and letting it be marked by
+                          hand would make the yield describe something other than what
+                          actually happened. */}
+                      {b.isManual && (
+                        <>
+                          <button
+                            onClick={() => settle(b.id, "won")}
+                            className="label-eyebrow text-[0.6rem] text-ink-soft hover:text-pitch"
+                            title="Marcar como ganada"
+                          >
+                            Ganada
+                          </button>
+                          <button
+                            onClick={() => settle(b.id, "lost")}
+                            className="label-eyebrow text-[0.6rem] text-ink-soft hover:text-red"
+                            title="Marcar como perdida"
+                          >
+                            Perdida
+                          </button>
+                        </>
+                      )}
+                      <button onClick={() => settle(b.id, "void")} className="label-eyebrow text-[0.6rem] text-ink-soft hover:text-gold" title="El partido se pospuso o canceló — no cuenta para profit/yield">
                         Anular
                       </button>
                       <button onClick={() => handleDelete(b.id)} className="label-eyebrow text-[0.6rem] text-ink-soft hover:text-red" title="Borrar por error de carga">

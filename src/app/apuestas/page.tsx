@@ -4,6 +4,7 @@ import { BankrollCard } from "@/components/betting/BankrollCard";
 import { BankrollChart } from "@/components/betting/BankrollChart";
 import { MonthlyBetsTable } from "@/components/betting/MonthlyBetsTable";
 import { SettleButton } from "@/components/betting/SettleButton";
+import { ManualBetForm } from "@/components/betting/ManualBetForm";
 import { prisma } from "@/lib/db";
 import { Card } from "@/components/ui/Card";
 import { formatPercent } from "@/lib/format";
@@ -50,7 +51,10 @@ export default async function ApuestasPage({ searchParams }: { searchParams: Pro
         </div>
       </header>
       <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 px-6 py-10">
-        <SettleButton pendingCount={pendingCount} lastCheckedAt={lastFetched?.fetchedAt?.toISOString() ?? null} />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <SettleButton pendingCount={pendingCount} lastCheckedAt={lastFetched?.fetchedAt?.toISOString() ?? null} />
+          <ManualBetForm />
+        </div>
         <BankrollCard status={bankroll} />
         <BankrollChart points={history} startingBalance={bankroll.startingBalance} />
 
@@ -58,7 +62,8 @@ export default async function ApuestasPage({ searchParams }: { searchParams: Pro
           <Card>
             <p className="text-sm text-ink-soft">
               Todavía no has registrado ninguna apuesta. Calcula un partido en el predictor y usa
-              la tarjeta &quot;Registrar apuesta&quot; sobre un fixture programado.
+              el control de apuestas, o añade una con &quot;+ Apuesta manual&quot; si viene de otra
+              fuente o de un deporte que la app no cubre.
             </p>
           </Card>
         ) : (

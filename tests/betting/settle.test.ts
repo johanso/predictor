@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { didMarketWin, settleBet, profitFor } from "@/lib/betting/settle";
 
 describe("didMarketWin — marca cada equipo", () => {
   it("settles home_scores on the home side's goals alone", () => {
@@ -42,7 +43,6 @@ describe("didMarketWin — marca cada equipo", () => {
     }
   });
 });
-import { didMarketWin, settleBet } from "@/lib/betting/settle";
 
 describe("didMarketWin", () => {
   it("home", () => {
@@ -109,5 +109,26 @@ describe("settleBet", () => {
     const result = settleBet("home", 2.5, 100, 0, 1);
     expect(result.won).toBe(false);
     expect(result.profit).toBeCloseTo(-100, 10);
+  });
+});
+
+describe("profitFor", () => {
+  it("pays the net odds on a win and loses the stake otherwise", () => {
+    expect(profitFor(true, 1.9, 10)).toBeCloseTo(9, 10);
+    expect(profitFor(false, 1.9, 10)).toBeCloseTo(-10, 10);
+    expect(profitFor(true, 4.0, 25)).toBeCloseTo(75, 10);
+  });
+
+  // The manual close on the bets page and automatic settlement both build the
+  // bankroll by summing this, so they must be the same function, not two copies.
+  it("is what settleBet uses, so manual and automatic closes agree", () => {
+    for (const [h, a] of [
+      [2, 0],
+      [0, 1],
+      [1, 1],
+    ]) {
+      const auto = settleBet("home", 2.5, 20, h, a);
+      expect(auto.profit).toBeCloseTo(profitFor(auto.won, 2.5, 20), 10);
+    }
   });
 });
