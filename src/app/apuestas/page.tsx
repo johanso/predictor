@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { getBankrollStatus, getMonthlySummaries, getBetsForMonth, getBankrollHistory } from "@/lib/betting/stats";
+import { getBankrollStatus, getMonthlySummaries, getBetsForMonth, getBankrollHistory, getSourcePerformance } from "@/lib/betting/stats";
 import { BankrollCard } from "@/components/betting/BankrollCard";
 import { BankrollChart } from "@/components/betting/BankrollChart";
 import { MonthlyBetsTable } from "@/components/betting/MonthlyBetsTable";
 import { SettleButton } from "@/components/betting/SettleButton";
 import { ManualBetForm } from "@/components/betting/ManualBetForm";
+import { SourcePerformanceCard } from "@/components/betting/SourcePerformanceCard";
 import { prisma } from "@/lib/db";
 import { Card } from "@/components/ui/Card";
 import { formatPercent } from "@/lib/format";
@@ -21,10 +22,11 @@ function StatTile({ label, value, tone }: { label: string; value: string; tone?:
 
 export default async function ApuestasPage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
   const { month: monthParam } = await searchParams;
-  const [bankroll, summaries, history, pendingCount, lastFetched] = await Promise.all([
+  const [bankroll, summaries, history, sources, pendingCount, lastFetched] = await Promise.all([
     getBankrollStatus(),
     getMonthlySummaries(),
     getBankrollHistory(),
+    getSourcePerformance(),
     prisma.bet.count({ where: { status: "pending" } }),
     // Most recent results fetch across the competitions in play — what "up to date"
     // actually means for settlement.
@@ -57,6 +59,7 @@ export default async function ApuestasPage({ searchParams }: { searchParams: Pro
         </div>
         <BankrollCard status={bankroll} />
         <BankrollChart points={history} startingBalance={bankroll.startingBalance} />
+        <SourcePerformanceCard sources={sources} />
 
         {summaries.length === 0 ? (
           <Card>

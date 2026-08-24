@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Pill";
@@ -7,10 +8,43 @@ import { formatPercent } from "@/lib/format";
 import type { BetModel } from "@/generated/prisma/models";
 
 const STATUS_TONE = { pending: "gold", won: "pitch", lost: "red", void: "neutral" } as const;
+const SELECT = "border border-line bg-paper-raised px-2 py-1.5 text-xs text-ink-soft outline-none focus:border-pitch";
 const STATUS_LABEL = { pending: "Pendiente", won: "Ganada", lost: "Perdida", void: "Anulada" } as const;
+
+type SortKey = "date" | "odds" | "stake" | "profit";
 
 export function MonthlyBetsTable({ bets }: { bets: BetModel[] }) {
   const router = useRouter();
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sortKey, setSortKey] = useState<SortKey>("date");
+
+  // Only the sources actually present this month — an empty option would just be a
+  // dead end.
+  const sources = useMemo(() => [...new Set(bets.map((b) => b.source))].sort(), [bets]);
+
+  const visible = useMemo(() => {
+    const filtered = bets.filter(
+      (b) => (sourceFilter === "all" || b.source === sourceFilter) && (statusFilter === "all" || b.status === statusFilter)
+    );
+    // Descending on every key: the interesting end of each is the top one — biggest
+    // stake, longest price, best and worst results.
+    return filtered.sort((a, b) => {
+      if (sortKey === "odds") return b.odds - a.odds;
+      if (sortKey === "stake") return b.stake - a.stake;
+      if (sortKey === "profit") return (b.profit ?? 0) - (a.profit ?? 0);
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [bets, sourceFilter, statusFilter, sortKey]);
+
+  // Totals reflect what is on screen, so a filtered view answers "how is this
+  // tipster doing this month" without mental arithmetic.
+  const shown = useMemo(() => {
+    const resolved = visible.filter((b) => b.status === "won" || b.status === "lost");
+    const staked = resolved.reduce((s, b) => s + b.stake, 0);
+    const profit = resolved.reduce((s, b) => s + (b.profit ?? 0), 0);
+    return { count: visible.length, resolved: resolved.length, staked, profit, yieldPct: staked > 0 ? profit / staked : null };
+  }, [visible]);
 
   async function handleDelete(id: number) {
     await fetch(`/api/bets/${id}`, { method: "DELETE" });
@@ -31,6 +65,52 @@ export function MonthlyBetsTable({ bets }: { bets: BetModel[] }) {
       {bets.length === 0 ? (
         <p className="text-sm text-ink-soft">Sin apuestas registradas este mes.</p>
       ) : (
+        <>
+        <div className="mb-4 flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1.5">
+            <span className="label-eyebrow text-[0.65rem] text-ink-soft">Fuente</span>
+            <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className={SELECT}>
+              <option value="all">Todas</option>
+              {sources.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="label-eyebrow text-[0.65rem] text-ink-soft">Estado</span>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={SELECT}>
+              <option value="all">Todos</option>
+              <option value="pending">Pendientes</option>
+              <option value="won">Ganadas</option>
+              <option value="lost">Perdidas</option>
+              <option value="void">Anuladas</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="label-eyebrow text-[0.65rem] text-ink-soft">Ordenar por</span>
+            <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} className={SELECT}>
+              <option value="date">Fecha</option>
+              <option value="odds">Cuota</option>
+              <option value="stake">Stake</option>
+              <option value="profit">Beneficio</option>
+            </select>
+          </label>
+
+          <p className="font-numeric ml-auto pb-2 text-[0.65rem] text-ink-soft">
+            {shown.count} de {bets.length}
+            {shown.resolved > 0 && (
+              <>
+                {" · "}
+                <span className={shown.profit >= 0 ? "text-pitch" : "text-red"}>
+                  {shown.profit >= 0 ? "+" : ""}
+                  {shown.profit.toFixed(2)}
+                </span>
+                {shown.yieldPct !== null && ` (${formatPercent(shown.yieldPct)} yield)`}
+              </>
+            )}
+          </p>
+        </div>
+
         <table className="w-full text-sm">
           <thead>
             <tr className="label-eyebrow border-b border-line text-left text-xs text-ink-soft">
@@ -47,7 +127,7 @@ export function MonthlyBetsTable({ bets }: { bets: BetModel[] }) {
             </tr>
           </thead>
           <tbody>
-            {bets.map((b) => (
+            {visible.map((b) => (
               <tr key={b.id} className="border-b border-line last:border-0">
                 <td className="px-2 py-2 text-xs text-ink-soft">{new Date(b.createdAt).toLocaleDateString("es")}</td>
                 <td className="px-2 py-2">
@@ -109,6 +189,10 @@ export function MonthlyBetsTable({ bets }: { bets: BetModel[] }) {
             ))}
           </tbody>
         </table>
+        {visible.length === 0 && (
+          <p className="py-4 text-center text-xs text-ink-soft">Ninguna apuesta coincide con el filtro.</p>
+        )}
+        </>
       )}
     </Card>
   );

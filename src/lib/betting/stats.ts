@@ -52,6 +52,60 @@ export async function getMonthlySummaries(): Promise<MonthlySummary[]> {
     });
 }
 
+export interface SourcePerformance {
+  source: string;
+  isManual: boolean;
+  totalBets: number;
+  resolvedBets: number;
+  pendingBets: number;
+  totalStaked: number;
+  totalProfit: number;
+  yieldPct: number | null;
+  winRate: number | null;
+  avgOdds: number | null;
+}
+
+/**
+ * Yield per origin, across all time — which tipster, or the model itself, is actually
+ * paying for itself.
+ *
+ * Ordered by profit rather than yield on purpose: yield on three settled bets is
+ * mostly noise, and sorting by it would put a lucky one-off at the top. `resolvedBets`
+ * rides along so the UI can say how much each row is worth believing.
+ */
+export async function getSourcePerformance(): Promise<SourcePerformance[]> {
+  const bets = await prisma.bet.findMany();
+
+  const bySource = new Map<string, BetModel[]>();
+  for (const bet of bets) {
+    const list = bySource.get(bet.source) ?? [];
+    list.push(bet);
+    bySource.set(bet.source, list);
+  }
+
+  return [...bySource.entries()]
+    .map(([source, sourceBets]) => {
+      const resolved = sourceBets.filter((b) => b.status === "won" || b.status === "lost");
+      const won = resolved.filter((b) => b.status === "won");
+      const totalStaked = resolved.reduce((s, b) => s + b.stake, 0);
+      const totalProfit = resolved.reduce((s, b) => s + (b.profit ?? 0), 0);
+
+      return {
+        source,
+        isManual: sourceBets[0].isManual,
+        totalBets: sourceBets.length,
+        resolvedBets: resolved.length,
+        pendingBets: sourceBets.filter((b) => b.status === "pending").length,
+        totalStaked,
+        totalProfit,
+        yieldPct: totalStaked > 0 ? totalProfit / totalStaked : null,
+        winRate: resolved.length > 0 ? won.length / resolved.length : null,
+        avgOdds: resolved.length > 0 ? resolved.reduce((s, b) => s + b.odds, 0) / resolved.length : null,
+      };
+    })
+    .sort((a, b) => b.totalProfit - a.totalProfit);
+}
+
 export async function getBetsForMonth(month: string): Promise<BetModel[]> {
   const [year, monthNum] = month.split("-").map(Number);
   const start = new Date(year, monthNum - 1, 1);
