@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Oswald, IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import { AccountBadge } from "@/components/auth/AccountBadge";
 import { RateLimitBadge } from "@/components/RateLimitBadge";
 import { OddsQuotaBadge } from "@/components/OddsQuotaBadge";
 import "./globals.css";
@@ -40,6 +41,7 @@ export default function RootLayout({
     <html lang="es" className={`${display.variable} ${body.variable} ${mono.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
         {children}
+        <AccountBadge />
         <RateLimitBadge />
         <OddsQuotaBadge />
       </body>

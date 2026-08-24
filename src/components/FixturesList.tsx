@@ -71,21 +71,21 @@ function TeamCrest({ src, alt }: { src: string | null; alt: string }) {
   );
 }
 
+// The row deliberately shows only the favourite, not the best edge: the value belongs
+// in the bet slip, where the real odds sit next to it. The list still sorts by it — see
+// sortedByValue — so the ordering carries the information without the clutter.
 function FixtureRow({
   f,
   pred,
   onSelect,
   dateLabel,
-  minProbability,
 }: {
   f: FixtureOption;
   pred: FixtureFavorite | undefined;
   onSelect: (fixture: FixtureOption) => void;
   /** Shown when the row isn't already grouped under a date header (probability sort mode). */
   dateLabel?: string;
-  minProbability: number;
 }) {
-  const edge = bestEdgeAbove(pred, minProbability);
   return (
     <button
       onClick={() => onSelect(f)}
@@ -111,19 +111,6 @@ function FixtureRow({
           {pred.favorite === "draw" ? "Empate" : pred.favoriteLabel} {formatPercent(pred.favoriteProbability)}
         </span>
       )}
-      <span className="font-numeric w-44 shrink-0 text-right text-[0.65rem]">
-        {edge ? (
-          <span
-            className="text-result-win"
-            title={`${edge.label} a ${edge.odds.toFixed(2)}${pred?.bookmaker ? ` en ${pred.bookmaker}` : ""}. El modelo le da ${(edge.probability * 100).toFixed(1)}% de probabilidad, ${(edge.points * 100).toFixed(1)} puntos por encima del ${((1 / edge.odds) * 100).toFixed(1)}% que implica la cuota. EV ${(edge.ev * 100).toFixed(1)}%.`}
-          >
-            {edge.label} <span className="text-ink-soft">{(edge.probability * 100).toFixed(0)}%</span>{" "}
-            <span className="opacity-70">+{(edge.points * 100).toFixed(1)}pp</span>
-          </span>
-        ) : (
-          <span className="text-ink-soft opacity-40">—</span>
-        )}
-      </span>
       <span className="shrink-0 text-lg text-ink-soft opacity-0 transition-opacity group-hover:opacity-100 hover:opacity-100">
         →
       </span>
@@ -306,14 +293,13 @@ export function FixturesList({
                 pred={predictions?.[f.id]}
                 onSelect={onSelect}
                 dateLabel={new Date(f.utcDate).toLocaleDateString("es", { day: "2-digit", month: "short" })}
-                minProbability={minProbability}
               />
             ))
           : groups.map((g) => (
               <div key={g.dateKey} ref={(el) => void (el ? sectionRefs.current.set(g.dateKey, el) : sectionRefs.current.delete(g.dateKey))}>
                 <p className="label-eyebrow px-4 bg-slate-100 sticky top-0 border-b border-t border-line py-2 text-[0.65rem] text-ink-soft">{g.label}</p>
                 {g.fixtures.map((f) => (
-                  <FixtureRow key={f.id} f={f} pred={predictions?.[f.id]} onSelect={onSelect} minProbability={minProbability} />
+                  <FixtureRow key={f.id} f={f} pred={predictions?.[f.id]} onSelect={onSelect} />
                 ))}
               </div>
             ))}

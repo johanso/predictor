@@ -7,7 +7,28 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
+}
+
+// One of the owner's own bookmaker accounts — "Bet365", "Betano". It exists so
+// bets and bankroll can be kept, and their yield measured, per bookmaker.
+//
+// Three things in this schema read like synonyms and are not:
+//   Account            — the owner's bookmaker account (this model)
+//   Bet.source         — where the *pick* came from ("modelo", a tipster's name)
+//   OddsSnapshot.bookmaker — whose *price* odds-api.io quoted
+// Do not unify them.
+//
+// The access code is the login: entering an account's code puts you inside it.
+// Only its scrypt hash is stored (src/lib/auth/codes.ts) — a leaked database
+// must not hand over the way back in.
+model Account {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  codeHash  String
+  createdAt DateTime  @default(now())
+  bets      Bet[]
+  bankroll  Bankroll?
 }
 
 model Competition {
@@ -139,6 +160,12 @@ model Prediction {
 model Bet {
   id                  Int          @id @default(autoincrement())
 
+  // Which of the owner's bookmaker accounts this bet was placed with. Every
+  // read from the bets page is filtered by it; settlement deliberately is not
+  // (see standingsCache.ts:refreshFromApi).
+  accountId           Int
+  account             Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
   // Where the pick came from. "modelo" for anything sent from the predictor — fixed,
   // since the app knows it produced it — or free text the user types for a manual one
   // (a tipster's name, a hunch, wherever). isManual is what actually branches
@@ -174,9 +201,10 @@ model Bet {
   actualAwayGoals     Int?
   profit              Float?
 
+  @@index([accountId, createdAt])
+  @@index([accountId, status])
+  // Kept unprefixed: settlement queries by competition *across* every account.
   @@index([competitionCode])
-  @@index([status])
-  @@index([createdAt])
 }
 
 
@@ -214,10 +242,27 @@ model OddsApiCall {
   @@index([calledAt])
 }
 
-// Singleton row (id always 1) holding the user's self-reported starting balance.
-// currentBalance is never stored — it's startingBalance + sum(profit) of settled Bets.
+// Sibling of OddsApiCall for the football-data.org budget: one row per request,
+// pruned past the 60-second window on write. This lived in a module variable while
+// the app ran as one local process; several serverless instances each keeping their
+// own count turned a 10/min cap into 10/min *each*.
+model FootballDataCall {
+  id       Int      @id @default(autoincrement())
+  calledAt DateTime @default(now())
+
+  @@index([calledAt])
+}
+
+// One row per Account, holding that bookmaker's self-reported starting balance.
+// currentBalance is never stored — it's startingBalance + sum(profit) of that
+// account's settled Bets.
+//
+// accountId is the primary key rather than a plain FK beside a surrogate id, so
+// "one bankroll per account" is a database guarantee. This model used to be a
+// singleton row pinned at id=1 for the same reason, one level down.
 model Bankroll {
-  id              Int      @id
+  accountId       Int      @id
+  account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
   startingBalance Float
   updatedAt       DateTime @updatedAt
 }

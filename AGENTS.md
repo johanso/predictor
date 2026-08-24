@@ -51,7 +51,7 @@ If you improve the model, **re-run the backtests and update these numbers** — 
 ## Architecture
 
 ```
-football-data.org ──> standingsCache ──> Match/TeamStanding (SQLite)
+football-data.org ──> standingsCache ──> Match/TeamStanding (Neon Postgres)
    (10 req/min)            │
                            ├──> ratingsCache ──> Dixon-Coles fit (in memory)
                            │                          │
@@ -59,7 +59,7 @@ football-data.org ──> standingsCache ──> Match/TeamStanding (SQLite)
                                     │
 odds-api.io ──────> oddsCache ──> OddsSnapshot ──> BetSlipCard
    (500 req/day)                                        │
-                                                   Bet / Bankroll
+                                          Account ──> Bet / Bankroll
 ```
 
 - `src/lib/poisson/` — pure computation, no network or DB. The model lives here.
@@ -67,7 +67,21 @@ odds-api.io ──────> oddsCache ──> OddsSnapshot ──> BetSlipCa
 - `src/lib/cache/` — the three cache layers (standings, fitted ratings, odds).
 - `src/lib/betting/` — Kelly, bet settlement, measured per-market reliability.
 - `src/lib/predictions/` — prediction tracking and evaluation.
-- `scripts/` — offline backtests. Excluded from `npm test` (see below).
+- `src/lib/auth/` — code hashing, session cookie, `requireAccount`. `src/proxy.ts` is the gate.
+- `scripts/` — offline backtests, plus `createAccount.ts`. Excluded from `npm test` (see below).
+
+### Accounts
+
+The app is deployed on Vercel against Neon Postgres and gated behind a per-account access code.
+An **Account is one of the owner's bookmaker accounts** — it exists so bets, bankroll and yield
+can be kept per bookmaker. Only `Bet` and `Bankroll` carry an `accountId`. Standings, fixtures,
+matches, odds snapshots, both quota ledgers and `Prediction` are shared world data with one
+physical owner; `Prediction` in particular measures the *model*, not a bettor, and splitting its
+calibration per bookmaker would divide an already small sample.
+
+Three things in the schema read like synonyms and are not: `Account` (which bookmaker the bet was
+placed with), `Bet.source` (where the pick came from — "modelo", a tipster), and
+`OddsSnapshot.bookmaker` (whose price odds-api.io quoted).
 
 ### Two estimation paths
 
@@ -92,12 +106,15 @@ Each is justified in the code; this is the index.
 | **Rho bounds: ceiling from the product, floor from the larger rate** (`dixonColes.ts:rhoBounds`) | They were inverted and allowed a rho that made the probability of a 0-0 negative. Easy to get backwards; tests pin it. |
 | **The tau form preserves mass exactly** (`dixonColes.ts`) | The rho terms cancel algebraically. A variant circulating elsewhere does not have this property — do not "correct" toward it. A test pins the property. |
 | **`united` and `city` are NOT noise words** (`oddsApi/matchTeams.ts`) | They are the only thing separating Manchester United from Manchester City. With them on the list both scored 1.000 and swapped odds. |
-| **The odds-api quota counter lives in the database** (`oddsApi/quota.ts`) | In memory it reset on every server reload and would have authorised the 501st request while reporting "0 used today". The football-data counter can stay in memory: its window is 60 seconds. |
+| **Both quota counters live in the database** (`oddsApi/quota.ts`, `footballData/rateLimiter.ts`) | In memory the odds counter reset on every server reload and would have authorised the 501st request while reporting "0 used today". The football-data one used to be exempt because its window is only 60 seconds — that held while the server was one long-lived local process, and stopped holding on Vercel, where each instance keeps its own array and a 10/min cap silently becomes 10/min *each*. |
+| **The 5-minute odds refresh floor reads `OddsSnapshot.fetchedAt`, not a Map** (`cache/oddsCache.ts`) | The module-level Map that enforced it is per-instance, so N cold instances each refreshed the same competition inside the window. The Map survives as a same-instance short-circuit; the database is the authority. |
+| **Settlement is global, reporting is scoped** (`cache/standingsCache.ts:refreshFromApi`) | The pending-bet query there is deliberately *not* filtered by `accountId`. A result is the same fact for every account and one API response settles all of them for free; this refresh has no session to scope to anyway. Scoping it would leave a bet pending until its own account happened to be logged in during a refresh. The counts returned by `/api/bets/settle` *are* scoped, because they sit next to one account's table. |
+| **Bet lookups by id are scoped to the account** (`api/bets/[id]/route.ts`) | Bet ids are small consecutive integers. An unscoped `findUnique` let any logged-in account void or delete another's bets by guessing, and 404 rather than 403 keeps it from leaking which ids exist. |
 
 ## External APIs and quota discipline
 
-**football-data.org** — 10 req/min. 6h cache in `standingsCache`, in-memory counter
-(`footballData/rateLimiter.ts`), on-screen badge.
+**football-data.org** — 10 req/min. 6h cache in `standingsCache`, DB-backed counter
+(`footballData/rateLimiter.ts` → `FootballDataCall`, pruned past the 60s window), on-screen badge.
 
 **odds-api.io** — 100/hour and 500/day. The discipline lives in `oddsCache.ts`:
 - `/odds/multi` prices **10 fixtures per request**: a whole matchday costs one call.
@@ -118,9 +135,16 @@ odds-api.io quirks found the hard way:
 
 ```bash
 npm run dev        # dev server
-npm test           # 112 tests — does NOT include scripts/
+npm test           # 160 tests — does NOT include scripts/
 npx tsc --noEmit   # typecheck
 npx eslint .       # lint
+
+# Database (Neon Postgres). DATABASE_URL is pooled, DIRECT_URL unpooled for migrations.
+npx prisma generate
+npx prisma migrate deploy
+
+# One bookmaker account. Prints its access code once — it is never recoverable.
+node scripts/createAccount.mts "Bet365" [--bankroll 200]
 
 # Offline backtests (need downloaded data, see below)
 npx vitest run --config vitest.backtest.config.ts scripts/leagues.test.ts   # does it generalise?
@@ -137,8 +161,20 @@ Backtests read season dumps from `data/{LEAGUE}/{YEAR}.json`, which are **not in
 ## Known traps
 
 - **Adding a Prisma model requires restarting the dev server.** Node keeps the previously
-  generated client in memory and the new model arrives as `undefined`. Guards in `oddsCache.ts`
-  and `quota.ts` say so explicitly.
+  generated client in memory and the new model arrives as `undefined`. Guards in `oddsCache.ts`,
+  `quota.ts` and `rateLimiter.ts` say so explicitly.
+- **`prisma migrate` needs `DIRECT_URL`, the app needs `DATABASE_URL`.** Migrations take advisory
+  locks and issue DDL, both of which Neon's PgBouncer pooling breaks. `prisma.config.ts` prefers
+  `DIRECT_URL`; `src/lib/db.ts` always uses the pooled one.
+- **The Prisma client is built lazily in `db.ts`.** Next evaluates modules during build-time page
+  data collection, when `DATABASE_URL` is not populated. Constructing the adapter at module scope
+  breaks `next build` on Vercel. Same reason `config.ts` uses getters.
+- **Anything reading the DB needs `export const dynamic = "force-dynamic"`.** Otherwise Next
+  prerenders it at build time with no database reachable — and for `leagues/[code]/page.tsx`,
+  spends real football-data quota on every deploy.
+- **Server-rendered dates need an explicit `timeZone`.** The deployed server runs in UTC. Use
+  `APP_TIME_ZONE` from `src/lib/format.ts`. Client components are fine as they are: they render in
+  the browser's zone, which is the right one.
 - **Vitest does not load `.env`.** Next.js does. A script in `scripts/` that needs keys must do
   `Object.assign(process.env, dotenv.parse(fs.readFileSync(".env")))` before importing anything
   that reads them.
@@ -150,7 +186,9 @@ Backtests read season dumps from `data/{LEAGUE}/{YEAR}.json`, which are **not in
 ## Product state
 
 Working: prediction with the fitted model, comparison against real Bet365 prices with autofill,
-value and Kelly computation, bet logging with a bankroll, and prediction tracking with calibration.
+value and Kelly computation, bet logging with a bankroll, prediction tracking with calibration,
+and multiple bookmaker accounts each with their own bankroll and statistics, behind a per-account
+access code. Deployed on Vercel against Neon Postgres.
 
 The most useful thing missing: **closing-line value (CLV) logging**. It is the only way to detect
 a real edge in ~50 bets instead of thousands. If the owner asks, that is the natural next step.

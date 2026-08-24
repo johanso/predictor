@@ -19,3 +19,5 @@ export async function GET(request: Request) {
 
   return NextResponse.json({ prediction });
 }
+
+export const dynamic = "force-dynamic";

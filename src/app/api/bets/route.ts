@@ -3,6 +3,9 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { BET_MARKETS } from "@/lib/betting/settle";
 import { getBetsForMonth } from "@/lib/betting/stats";
+import { isAuthError, requireAccountApi } from "@/lib/auth/server";
+
+export const dynamic = "force-dynamic";
 
 const marketValues = BET_MARKETS.map((m) => m.value) as [string, ...string[]];
 
@@ -44,6 +47,11 @@ const bodySchema = z.union([manualBetSchema, modelBetSchema]);
 // No server-side gate here (unlike /api/predictions) — this is the user's own
 // subjective record of a real bet they placed, not data feeding model calibration.
 export async function POST(request: Request) {
+  // The account comes from the session, never from the body — a client must not
+  // get to name which bookmaker's book it is writing into.
+  const account = await requireAccountApi();
+  if (isAuthError(account)) return account;
+
   const json = await request.json().catch(() => null);
   const parsed = bodySchema.safeParse(json);
   if (!parsed.success) {
@@ -53,6 +61,7 @@ export async function POST(request: Request) {
   const data = parsed.data;
 
   const common = {
+    accountId: account.id,
     homeTeamName: data.homeTeamName,
     awayTeamName: data.awayTeamName,
     matchUtcDate: new Date(data.matchUtcDate),
@@ -89,12 +98,15 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
+  const account = await requireAccountApi();
+  if (isAuthError(account)) return account;
+
   const url = new URL(request.url);
   const month = url.searchParams.get("month");
   if (!month || !/^\d{4}-\d{2}$/.test(month)) {
     return NextResponse.json({ error: "Query param 'month' is required, format YYYY-MM." }, { status: 400 });
   }
 
-  const bets = await getBetsForMonth(month);
+  const bets = await getBetsForMonth(account.id, month);
   return NextResponse.json({ bets });
 }

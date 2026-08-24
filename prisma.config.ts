@@ -9,6 +9,9 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    // Migrations take advisory locks and issue DDL, both of which PgBouncer's
+    // transaction pooling breaks — so the CLI uses Neon's *direct* URL while the
+    // runtime client (src/lib/db.ts) keeps using the pooled DATABASE_URL.
+    url: process.env["DIRECT_URL"] ?? process.env["DATABASE_URL"],
   },
 });

@@ -5,7 +5,9 @@ import { bttsPick, overUnderPick } from "@/lib/predictions/evaluate";
 import { Card } from "@/components/ui/Card";
 import { ProbabilityBar } from "@/components/ui/ProbabilityBar";
 import { Pill } from "@/components/ui/Pill";
-import { formatPercent } from "@/lib/format";
+import { APP_TIME_ZONE, formatPercent } from "@/lib/format";
+
+export const dynamic = "force-dynamic";
 
 /**
  * One market's pick shown next to its outcome. The probability is the model's
@@ -128,7 +130,7 @@ export default async function RendimientoPage() {
                     return (
                       <tr key={p.id} className="border-b border-line last:border-0">
                         <td className="px-2 py-2 text-xs whitespace-nowrap text-ink-soft">
-                          {new Date(p.createdAt).toLocaleDateString("es")}
+                          {new Date(p.createdAt).toLocaleDateString("es", { timeZone: APP_TIME_ZONE })}
                         </td>
                         <td className="px-2 py-2 whitespace-nowrap">
                           <span className="text-pitch">{p.homeTeamName}</span> <span className="text-ink-soft">vs</span>{" "}
