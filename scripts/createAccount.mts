@@ -19,7 +19,14 @@ import dotenv from "dotenv";
 
 // Vitest and plain Node do not load .env the way Next does, so populate it by hand.
 // dotenv.parse, not dotenv.config — config() prints a banner to stdout.
-Object.assign(process.env, dotenv.parse(fs.readFileSync(".env")));
+//
+// Only fills in what is *not* already set, matching dotenv's own semantics. A blind
+// Object.assign would let .env silently override a DATABASE_URL exported in the
+// shell to target another branch — so `DATABASE_URL=<prod> node createAccount.mts`
+// would quietly create the account in dev instead, and report success either way.
+for (const [key, value] of Object.entries(dotenv.parse(fs.readFileSync(".env")))) {
+  process.env[key] ??= value;
+}
 
 const { PrismaClient } = await import("../src/generated/prisma/client.ts");
 const { PrismaNeon } = await import("@prisma/adapter-neon");
