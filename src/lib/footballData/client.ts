@@ -13,7 +13,7 @@ export class FootballDataError extends Error {
 }
 
 async function fdFetch<T>(path: string): Promise<T> {
-  recordApiCall();
+  await recordApiCall();
   const res = await fetch(`${config.footballData.baseUrl}${path}`, {
     headers: { "X-Auth-Token": config.footballData.apiKey },
     cache: "no-store",

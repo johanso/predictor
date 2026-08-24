@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { ensureFreshStandings, FootballDataError } from "@/lib/cache/standingsCache";
 import { getCompetitionInfo } from "@/lib/footballData/competitions";
+import { isAuthError, requireAccountApi } from "@/lib/auth/server";
+
+export const dynamic = "force-dynamic";
+// It walks competitions one at a time behind a 10-requests-per-minute limiter;
+// the platform default would cut the loop off partway through.
+export const maxDuration = 60;
 
 /**
  * Settles everything whose match has already been played.
@@ -15,12 +21,23 @@ import { getCompetitionInfo } from "@/lib/footballData/competitions";
  * Only competitions with something actually waiting are refreshed, and only once the
  * kickoff is far enough in the past for the match to be over, so the button costs the
  * fewest football-data.org requests it can.
+ *
+ * Which competitions get refreshed is global; what gets reported back is scoped to
+ * the logged-in account. Refreshing a competition another account is waiting on
+ * costs this caller nothing — the response is shared and cached — whereas scoping
+ * it would mean logging into each bookmaker in turn just to make results land,
+ * which is the friction this front door exists to remove. The counts, though, sit
+ * next to one account's table, so "3 liquidadas" has to mean the three rows that
+ * just changed on screen.
  */
 
 // A match is assumed finished this long after kickoff; results appear upstream soon after.
 const MATCH_DURATION_MS = 2.5 * 60 * 60 * 1000;
 
 export async function POST() {
+  const account = await requireAccountApi();
+  if (isAuthError(account)) return account;
+
   const cutoff = new Date(Date.now() - MATCH_DURATION_MS);
 
   const [pendingBets, pendingPredictions] = await Promise.all([
@@ -54,7 +71,7 @@ export async function POST() {
     });
   }
 
-  const before = await countOutstanding();
+  const before = await countOutstanding(account.id);
   const refreshed: string[] = [];
   const failures: string[] = [];
 
@@ -67,21 +84,25 @@ export async function POST() {
     }
   }
 
-  const after = await countOutstanding();
+  const after = await countOutstanding(account.id);
 
   return NextResponse.json({
     refreshed,
     failures,
     settledBets: Math.max(0, before.bets - after.bets),
+    settledOtherAccounts: Math.max(0, before.betsAllAccounts - after.betsAllAccounts - (before.bets - after.bets)),
     evaluatedPredictions: Math.max(0, before.predictions - after.predictions),
     stillPendingBets: after.bets,
   });
 }
 
-async function countOutstanding() {
-  const [bets, predictions] = await Promise.all([
+async function countOutstanding(accountId: number) {
+  const [bets, betsAllAccounts, predictions] = await Promise.all([
+    prisma.bet.count({ where: { accountId, status: "pending", isManual: false } }),
     prisma.bet.count({ where: { status: "pending", isManual: false } }),
+    // Predictions stay global: they measure the model, not a bettor, and the page
+    // says as much.
     prisma.prediction.count({ where: { evaluatedAt: null } }),
   ]);
-  return { bets, predictions };
+  return { bets, betsAllAccounts, predictions };
 }

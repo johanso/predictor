@@ -9,6 +9,9 @@ import { SourcePerformanceCard } from "@/components/betting/SourcePerformanceCar
 import { prisma } from "@/lib/db";
 import { Card } from "@/components/ui/Card";
 import { formatPercent } from "@/lib/format";
+import { requireAccount } from "@/lib/auth/server";
+
+export const dynamic = "force-dynamic";
 
 function StatTile({ label, value, tone }: { label: string; value: string; tone?: "pitch" | "red" }) {
   const toneClass = tone === "pitch" ? "text-pitch" : tone === "red" ? "text-red" : "text-ink";
@@ -21,21 +24,23 @@ function StatTile({ label, value, tone }: { label: string; value: string; tone?:
 }
 
 export default async function ApuestasPage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
+  const account = await requireAccount();
   const { month: monthParam } = await searchParams;
   const [bankroll, summaries, history, sources, pendingCount, lastFetched] = await Promise.all([
-    getBankrollStatus(),
-    getMonthlySummaries(),
-    getBankrollHistory(),
-    getSourcePerformance(),
-    prisma.bet.count({ where: { status: "pending" } }),
+    getBankrollStatus(account.id),
+    getMonthlySummaries(account.id),
+    getBankrollHistory(account.id),
+    getSourcePerformance(account.id),
+    prisma.bet.count({ where: { accountId: account.id, status: "pending" } }),
     // Most recent results fetch across the competitions in play — what "up to date"
-    // actually means for settlement.
+    // actually means for settlement. Deliberately not scoped: the results cache is
+    // shared by every account.
     prisma.competition.findFirst({ where: { fetchedAt: { not: null } }, orderBy: { fetchedAt: "desc" }, select: { fetchedAt: true } }),
   ]);
 
   const activeMonth = monthParam && summaries.some((s) => s.month === monthParam) ? monthParam : (summaries[0]?.month ?? null);
   const activeSummary = summaries.find((s) => s.month === activeMonth) ?? null;
-  const bets = activeMonth ? await getBetsForMonth(activeMonth) : [];
+  const bets = activeMonth ? await getBetsForMonth(account.id, activeMonth) : [];
 
   return (
     <>
@@ -45,8 +50,9 @@ export default async function ApuestasPage({ searchParams }: { searchParams: Pro
             ← Ligas
           </Link>
           <h1 className="mt-2 text-3xl font-semibold uppercase tracking-tight">Control de apuestas</h1>
+          <p className="label-eyebrow mt-1 text-xs text-gold">{account.name}</p>
           <p className="mt-2 max-w-lg text-sm text-chrome-ink/70">
-            Registro real de tus apuestas — cuotas y stakes que ingresaste a mano, liquidado
+            Registro real de tus apuestas en esta casa — cuotas y stakes que ingresaste a mano, liquidado
             contra los resultados reales. Se actualiza solo al refrescar una liga; usa
             &quot;Actualizar resultados&quot; para forzarlo cuando un partido ya terminó.
           </p>

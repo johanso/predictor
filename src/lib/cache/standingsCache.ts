@@ -10,6 +10,7 @@ import type { TeamGoalStats } from "@/types/domain";
 
 const TTL_MS = 6 * 60 * 60 * 1000; // refetch at most every 6h
 const MIN_REFRESH_INTERVAL_MS = 60 * 1000; // guard against rapid "Refresh" clicks
+const CORRECTION_WINDOW_MS = 14 * 24 * 60 * 60 * 1000; // how far back a stored score is still rewritten
 
 export interface StandingsRow {
   teamId: number;
@@ -262,6 +263,10 @@ async function refreshFromApi(code: string, name: string, hasHomeAway: boolean):
   const season = data.season?.startDate ? new Date(data.season.startDate).getFullYear() : null;
   const byTeam = aggregateFromMatches(data.matches);
   const completedMatches = data.matches.filter((m) => m.score.fullTime.home !== null && m.score.fullTime.away !== null);
+  // The window in which upstream might still amend a scoreline. Everything older is
+  // inserted once and never touched again — see the transaction below.
+  const correctionWindow = Date.now() - CORRECTION_WINDOW_MS;
+  const recentMatches = completedMatches.filter((m) => new Date(m.utcDate).getTime() >= correctionWindow);
 
   // Opportunistic evaluation: piggybacks on this same fetch, no extra API calls. A
   // tracked prediction gets evaluated the next time this competition's cache refreshes
@@ -301,6 +306,12 @@ async function refreshFromApi(code: string, name: string, hasHomeAway: boolean):
   // isManual excluded on purpose: a manual bet may be another sport entirely, and
   // even when it is football it carries no football-data team ids to match on. Those
   // are closed by hand from the bets page.
+  //
+  // Deliberately NOT filtered by accountId. A match result is the same fact for every
+  // bookmaker account, one API response settles all of them at once for free, and this
+  // refresh has no session to scope to anyway. Scoping it would leave a bet pending
+  // until its own account happened to be logged in during a refresh — intermittent,
+  // invisible staleness that would take weeks to notice.
   const pendingBets = await prisma.bet.findMany({
     where: { competitionCode: code, status: "pending", isManual: false },
   });
@@ -369,20 +380,30 @@ async function refreshFromApi(code: string, name: string, hasHomeAway: boolean):
         },
       }),
     ]),
-    ...completedMatches.map((m) =>
-      prisma.match.upsert({
+    // One statement for the whole season instead of one upsert per match. A finished
+    // Match is immutable (see the model comment), so anything already stored is
+    // already right and skipDuplicates can drop it. This used to be ~380 upserts,
+    // which was free against a local SQLite file and is ~380 network round trips
+    // against a hosted Postgres — enough to blow the transaction timeout on its own.
+    prisma.match.createMany({
+      data: completedMatches.map((m) => ({
+        id: m.id,
+        competitionCode: code,
+        utcDate: new Date(m.utcDate),
+        homeTeamId: m.homeTeam.id,
+        awayTeamId: m.awayTeam.id,
+        homeGoals: m.score.fullTime.home!,
+        awayGoals: m.score.fullTime.away!,
+        winner: m.score.winner,
+      })),
+      skipDuplicates: true,
+    }),
+    // "Immutable" holds in practice, not on the day upstream corrects a scoreline, so
+    // recent matches still get written through. A handful of rows per refresh.
+    ...recentMatches.map((m) =>
+      prisma.match.update({
         where: { id: m.id },
-        create: {
-          id: m.id,
-          competitionCode: code,
-          utcDate: new Date(m.utcDate),
-          homeTeamId: m.homeTeam.id,
-          awayTeamId: m.awayTeam.id,
-          homeGoals: m.score.fullTime.home!,
-          awayGoals: m.score.fullTime.away!,
-          winner: m.score.winner,
-        },
-        update: {
+        data: {
           utcDate: new Date(m.utcDate),
           homeGoals: m.score.fullTime.home!,
           awayGoals: m.score.fullTime.away!,

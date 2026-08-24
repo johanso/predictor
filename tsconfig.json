@@ -10,6 +10,10 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
+    // scripts/createAccount.ts runs under `node --experimental-strip-types`, which
+    // resolves relative imports by their real filename and so needs the .ts suffix
+    // written out. Safe with noEmit: nothing here is compiled by tsc.
+    "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,

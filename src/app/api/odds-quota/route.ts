@@ -8,3 +8,5 @@ export async function GET() {
   }
   return NextResponse.json({ configured: true, ...(await getOddsQuota()) });
 }
+
+export const dynamic = "force-dynamic";

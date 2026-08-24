@@ -2,12 +2,18 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { profitFor } from "@/lib/betting/settle";
+import { isAuthError, requireAccountApi } from "@/lib/auth/server";
+
+export const dynamic = "force-dynamic";
 
 // Void = the match got postponed/cancelled, so there's no result to settle
 // against — distinct from delete (which is for correcting a logging mistake).
 // A voided bet keeps its row (for the monthly record) but never affects
 // profit/yield: profit is fixed at 0 and it's excluded from win-rate math.
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const account = await requireAccountApi();
+  if (isAuthError(account)) return account;
+
   const { id } = await params;
   const betId = Number(id);
   if (!Number.isInteger(betId)) {
@@ -23,7 +29,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     );
   }
 
-  const bet = await prisma.bet.findUnique({ where: { id: betId } });
+  // Scoped by accountId, not just id: bet ids are small consecutive integers, so an
+  // unscoped lookup would let any logged-in account void or delete another's bets by
+  // guessing. 404 rather than 403 on someone else's — it leaks nothing about which
+  // ids exist.
+  const bet = await prisma.bet.findFirst({ where: { id: betId, accountId: account.id } });
   if (!bet) {
     return NextResponse.json({ error: "Bet not found." }, { status: 404 });
   }
@@ -53,13 +63,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const account = await requireAccountApi();
+  if (isAuthError(account)) return account;
+
   const { id } = await params;
   const betId = Number(id);
   if (!Number.isInteger(betId)) {
     return NextResponse.json({ error: "Invalid bet id." }, { status: 400 });
   }
 
-  const bet = await prisma.bet.findUnique({ where: { id: betId } });
+  const bet = await prisma.bet.findFirst({ where: { id: betId, accountId: account.id } });
   if (!bet) {
     return NextResponse.json({ error: "Bet not found." }, { status: 404 });
   }

@@ -13,12 +13,17 @@ export interface MonthlySummary {
   winRate: number | null; // won / resolved
 }
 
+// UTC, not local time. The dev machine runs at UTC-5 and the deployed server at
+// UTC, so reading a bet's month in local time would move bets placed in the last
+// hours of a month into the next one depending on where the code happens to run.
+// getBetsForMonth's bounds must stay in the same zone as this or the month tabs
+// and the month's contents disagree.
 function monthKey(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-export async function getMonthlySummaries(): Promise<MonthlySummary[]> {
-  const bets = await prisma.bet.findMany({ orderBy: { createdAt: "desc" } });
+export async function getMonthlySummaries(accountId: number): Promise<MonthlySummary[]> {
+  const bets = await prisma.bet.findMany({ where: { accountId }, orderBy: { createdAt: "desc" } });
 
   const byMonth = new Map<string, BetModel[]>();
   for (const bet of bets) {
@@ -69,12 +74,17 @@ export interface SourcePerformance {
  * Yield per origin, across all time — which tipster, or the model itself, is actually
  * paying for itself.
  *
+ * Scoped to one account, and grouped by Bet.source *within* it: "source" is where
+ * the pick came from, the account is which bookmaker it was placed with. Two
+ * different questions, and merging them would pool bookmakers that have different
+ * prices and different margins.
+ *
  * Ordered by profit rather than yield on purpose: yield on three settled bets is
  * mostly noise, and sorting by it would put a lucky one-off at the top. `resolvedBets`
  * rides along so the UI can say how much each row is worth believing.
  */
-export async function getSourcePerformance(): Promise<SourcePerformance[]> {
-  const bets = await prisma.bet.findMany();
+export async function getSourcePerformance(accountId: number): Promise<SourcePerformance[]> {
+  const bets = await prisma.bet.findMany({ where: { accountId } });
 
   const bySource = new Map<string, BetModel[]>();
   for (const bet of bets) {
@@ -92,7 +102,11 @@ export async function getSourcePerformance(): Promise<SourcePerformance[]> {
 
       return {
         source,
-        isManual: sourceBets[0].isManual,
+        // `source` and `isManual` are independent columns — a tipster's name can sit
+        // on a model bet and a hand-typed one alike — so the group only earns the
+        // manual pill when every bet in it is manual. Reading it off an arbitrary
+        // member (sourceBets[0]) labelled the row at random.
+        isManual: sourceBets.every((b) => b.isManual),
         totalBets: sourceBets.length,
         resolvedBets: resolved.length,
         pendingBets: sourceBets.filter((b) => b.status === "pending").length,
@@ -106,12 +120,13 @@ export async function getSourcePerformance(): Promise<SourcePerformance[]> {
     .sort((a, b) => b.totalProfit - a.totalProfit);
 }
 
-export async function getBetsForMonth(month: string): Promise<BetModel[]> {
+export async function getBetsForMonth(accountId: number, month: string): Promise<BetModel[]> {
   const [year, monthNum] = month.split("-").map(Number);
-  const start = new Date(year, monthNum - 1, 1);
-  const end = new Date(year, monthNum, 1);
+  // Date.UTC, matching monthKey above — see the note there.
+  const start = new Date(Date.UTC(year, monthNum - 1, 1));
+  const end = new Date(Date.UTC(year, monthNum, 1));
   return prisma.bet.findMany({
-    where: { createdAt: { gte: start, lt: end } },
+    where: { accountId, createdAt: { gte: start, lt: end } },
     orderBy: { createdAt: "desc" },
   });
 }
@@ -124,15 +139,13 @@ export interface BankrollStatus {
   pendingCount: number;
 }
 
-const BANKROLL_ID = 1;
-
-export async function getBankrollStatus(): Promise<BankrollStatus> {
+export async function getBankrollStatus(accountId: number): Promise<BankrollStatus> {
   const [bankroll, resolvedBets, pendingCount] = await Promise.all([
-    prisma.bankroll.findUnique({ where: { id: BANKROLL_ID } }),
+    prisma.bankroll.findUnique({ where: { accountId } }),
     // "won"/"lost" only — a voided bet always has profit 0, so including it here
     // wouldn't change currentBalance, but it also shouldn't count toward totalStaked.
-    prisma.bet.findMany({ where: { status: { in: ["won", "lost"] } } }),
-    prisma.bet.count({ where: { status: "pending" } }),
+    prisma.bet.findMany({ where: { accountId, status: { in: ["won", "lost"] } } }),
+    prisma.bet.count({ where: { accountId, status: "pending" } }),
   ]);
 
   const startingBalance = bankroll?.startingBalance ?? 0;
@@ -155,10 +168,13 @@ export interface BankrollHistoryPoint {
 }
 
 /** Cumulative bankroll balance after each settled (won/lost) bet, in order — the "evolución de banca" chart's data. */
-export async function getBankrollHistory(): Promise<BankrollHistoryPoint[]> {
+export async function getBankrollHistory(accountId: number): Promise<BankrollHistoryPoint[]> {
   const [bankroll, resolvedBets] = await Promise.all([
-    prisma.bankroll.findUnique({ where: { id: BANKROLL_ID } }),
-    prisma.bet.findMany({ where: { status: { in: ["won", "lost"] } }, orderBy: { settledAt: "asc" } }),
+    prisma.bankroll.findUnique({ where: { accountId } }),
+    prisma.bet.findMany({
+      where: { accountId, status: { in: ["won", "lost"] } },
+      orderBy: { settledAt: "asc" },
+    }),
   ]);
 
   const startingBalance = bankroll?.startingBalance ?? 0;
@@ -179,10 +195,10 @@ export async function getBankrollHistory(): Promise<BankrollHistoryPoint[]> {
   return points;
 }
 
-export async function setStartingBalance(startingBalance: number): Promise<void> {
+export async function setStartingBalance(accountId: number, startingBalance: number): Promise<void> {
   await prisma.bankroll.upsert({
-    where: { id: BANKROLL_ID },
-    create: { id: BANKROLL_ID, startingBalance },
+    where: { accountId },
+    create: { accountId, startingBalance },
     update: { startingBalance },
   });
 }

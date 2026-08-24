@@ -58,3 +58,5 @@ export async function GET(request: Request) {
     return NextResponse.json({ configured: true, supported: true, odds: [], quota: await getOddsQuota(), error: message }, { status: 502 });
   }
 }
+
+export const dynamic = "force-dynamic";

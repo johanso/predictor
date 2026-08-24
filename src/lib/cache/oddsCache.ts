@@ -33,7 +33,27 @@ export interface CachedOdds {
   eventId: string;
 }
 
+// Same-instance short-circuit only. It used to be the sole enforcement of
+// MIN_REFRESH_MS, which held while "the server" was one long-lived local process and
+// stops holding the moment several instances run at once: each gets its own empty
+// Map and each refreshes the same competition inside the five minutes. The authority
+// is now the newest OddsSnapshot.fetchedAt for the competition — see lastRefreshAt.
 const lastRefreshByCompetition = new Map<string, number>();
+
+/**
+ * When this competition's prices were last written, from the database rather than
+ * from process memory. Uses the existing [competitionCode, matchUtcDate] index; no
+ * extra table needed, because a refresh is exactly what stamps fetchedAt.
+ */
+async function lastRefreshAt(competitionCode: string): Promise<number> {
+  const inMemory = lastRefreshByCompetition.get(competitionCode) ?? 0;
+  const newest = await oddsTable().findFirst({
+    where: { competitionCode },
+    orderBy: { fetchedAt: "desc" },
+    select: { fetchedAt: true },
+  });
+  return Math.max(inMemory, newest?.fetchedAt.getTime() ?? 0);
+}
 
 interface FixtureRef {
   homeTeamName: string;
@@ -61,8 +81,7 @@ export async function getOddsForFixture(
 
   const cached = await readCache(competitionCode, fixture);
   const isStale = cached.length === 0 || Date.now() - cached[0].fetchedAt.getTime() > TTL_MS;
-  const lastRefresh = lastRefreshByCompetition.get(competitionCode) ?? 0;
-  const refreshAllowed = Date.now() - lastRefresh > MIN_REFRESH_MS;
+  const refreshAllowed = Date.now() - (await lastRefreshAt(competitionCode)) > MIN_REFRESH_MS;
 
   if ((isStale || opts.forceRefresh) && refreshAllowed) {
     try {

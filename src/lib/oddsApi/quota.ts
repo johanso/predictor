@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { APP_TIME_ZONE } from "@/lib/format";
 
 /**
  * Usage tracking for odds-api.io's free plan, persisted rather than held in memory.
@@ -77,7 +78,10 @@ export async function recordOddsCall(endpoint: string): Promise<void> {
 }
 
 function formatTime(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" }) : "—";
+  // Explicit zone: this string is built on the server, which runs in UTC once deployed.
+  return iso
+    ? new Date(iso).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit", timeZone: APP_TIME_ZONE })
+    : "—";
 }
 
 export class OddsQuotaError extends Error {

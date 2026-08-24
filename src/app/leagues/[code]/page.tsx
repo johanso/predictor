@@ -9,6 +9,9 @@ import { LeaguePageClient } from "@/components/LeaguePageClient";
 import { Banner } from "@/components/ui/Banner";
 import { SeasonRecordsCard } from "@/components/SeasonRecordsCard";
 
+// This page both reads the DB and, on a stale cache, calls football-data.org while
+// rendering. Prerendering it at build time would burn real quota on every deploy.
+export const dynamic = "force-dynamic";
 
 export default async function LeaguePage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
